@@ -3,7 +3,7 @@ console.log("indexStart");
 const fs = require('fs');
 const path = require('path');
 console.log("before economy");
-const economy = require('./Economy');
+const economy = require('./Database/Economy');
 console.log("after economy");
 
 const client = new Client({
