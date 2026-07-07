@@ -68,10 +68,71 @@ async function setBalance(id, amount) {
     );
 }
 
+async function setDaily(id, time) {
+    await getUser(id);
+
+    await db.run(
+        "UPDATE users SET daily = ? WHERE id = ?",
+        time,
+        id
+    );
+}
+
+async function transfer(fromId, toId, amount) {
+    await getUser(fromId);
+    await getUser(toId);
+
+    await db.run(
+        "UPDATE users SET balance = balance - ? WHERE id = ?",
+        amount,
+        fromId
+    );
+
+    await db.run(
+        "UPDATE users SET balance = balance + ? WHERE id = ?",
+        amount,
+        toId
+    );
+}
+
+async function getTop(limit = 10) {
+    return await db.all(
+        "SELECT * FROM users ORDER BY balance DESC LIMIT ?",
+        limit
+    );
+}
+
+async function deposit(id, amount) {
+    await getUser(id);
+
+    await db.run(
+        "UPDATE users SET balance = balance - ?, bank = bank + ? WHERE id = ?",
+        amount,
+        amount,
+        id
+    );
+}
+
+async function withdraw(id, amount) {
+    await getUser(id);
+
+    await db.run(
+        "UPDATE users SET balance = balance + ?, bank = bank - ? WHERE id = ?",
+        amount,
+        amount,
+        id
+    );
+}
+
 module.exports = {
     initDatabase,
     getUser,
     addBalance,
     removeBalance,
-    setBalance
+    setBalance,
+    setDaily,
+    transfer,
+    getTop,
+    deposit,
+    withdraw
 };
