@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const economy = require('./database/economy');
+const economy = require('./Economy');
 
 const client = new Client({
     intents: [
