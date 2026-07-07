@@ -96,10 +96,13 @@ client.on('interactionCreate', async interaction => {
 (async () => {
 
     try {
-
+        console.log("1");
+    
         await economy.initDatabase();
+        console.log("2");
 
         await client.login(process.env.DISCORD_TOKEN);
+        console.log("3");
 
     } catch (error) {
 
