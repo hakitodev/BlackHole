@@ -101,8 +101,10 @@ client.on('interactionCreate', async interaction => {
         await economy.initDatabase();
         console.log("2");
 
+        console.log("TOKEN:", process.env.DISCORD_TOKEN ? "Есть" : "Нет");
+
         await client.login(process.env.DISCORD_TOKEN);
-        console.log("3");
+        console.log("3!");
 
     } catch (error) {
 
