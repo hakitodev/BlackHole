@@ -1,70 +1,110 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
+const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const economy = require('./database/economy');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.MessageContent
-  ]
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
 client.commands = new Map();
-
-const commandFiles = fs
-    .readdirSync(path.join(__dirname, 'commands'))
-    .filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-    const command = require(`./commands/${file}`);
-    client.commands.set(command.data.name, command);
-}
-
 client.buttons = new Map();
 
-const buttonFiles = fs
-    .readdirSync(path.join(__dirname, 'buttons'))
-    .filter(file => file.endsWith('.js'));
+function load(folder, callback) {
+    const folderPath = path.join(__dirname, folder);
 
-for (const file of buttonFiles) {
-    const button = require(`./buttons/${file}`);
-    client.buttons.set(button.id, button);
-}
+    if (!fs.existsSync(folderPath)) return;
 
-const eventFiles = fs
-    .readdirSync(path.join(__dirname, 'events'))
-    .filter(file => file.endsWith('.js'));
+    const files = fs.readdirSync(folderPath)
+        .filter(file => file.endsWith('.js'));
 
-for (const file of eventFiles) {
-    const event = require(`./events/${file}`);
-    client.on(event.name, (...args) => event.execute(client, ...args));
-}
-
-client.on('interactionCreate', async interaction => {
-    if (interaction.isChatInputCommand()) {
-        const command = client.commands.get(interaction.commandName);
-        if (!command) return;
-        return command.execute(interaction);
+    for (const file of files) {
+        const module = require(path.join(folderPath, file));
+        callback(module);
     }
-    if (interaction.isButton()) {
-        const id = interaction.customId.split('_')[0];
-        const button = client.buttons.get(id);
-        if (!button) return;
-        return button.execute(interaction);
+}
+
+// Команды
+load('commands', command => {
+    client.commands.set(command.data.name, command);
+});
+
+// Кнопки
+load('buttons', button => {
+    client.buttons.set(button.id, button);
+});
+
+// События
+load('events', event => {
+    if (event.once) {
+        client.once(event.name, (...args) => event.execute(client, ...args));
+    } else {
+        client.on(event.name, (...args) => event.execute(client, ...args));
     }
 });
 
-const economy = require("./database/economy");
+// Обработка Slash-команд и кнопок
+client.on('interactionCreate', async interaction => {
 
+    try {
+
+        if (interaction.isChatInputCommand()) {
+
+            const command = client.commands.get(interaction.commandName);
+
+            if (!command) return;
+
+            return await command.execute(interaction);
+
+        }
+
+        if (interaction.isButton()) {
+
+            const id = interaction.customId.split('_')[0];
+
+            const button = client.buttons.get(id);
+
+            if (!button) return;
+
+            return await button.execute(interaction);
+
+        }
+
+    } catch (error) {
+
+        console.error(error);
+
+        const reply = {
+            content: '❌ Произошла ошибка при выполнении команды.',
+            ephemeral: true
+        };
+
+        if (interaction.replied || interaction.deferred)
+            await interaction.followUp(reply).catch(() => {});
+        else
+            await interaction.reply(reply).catch(() => {});
+    }
+
+});
+
+// Запуск
 (async () => {
 
-    await economy.initDatabase();
+    try {
 
-    client.login(process.env.DISCORD_TOKEN);
+        await economy.initDatabase();
+
+        await client.login(process.env.DISCORD_TOKEN);
+
+    } catch (error) {
+
+        console.error('Ошибка запуска:', error);
+
+    }
 
 })();
-
-client.login(process.env.DISCORD_TOKEN);
