@@ -33,17 +33,17 @@ function load(folder, callback) {
 }
 
 // Команды
-load('commands', command => {
+load('Commands', command => {
     client.commands.set(command.data.name, command);
 });
 
 // Кнопки
-load('buttons', button => {
+load('Buttons', button => {
     client.buttons.set(button.id, button);
 });
 
 // События
-load('events', event => {
+load('Events', event => {
     if (event.once) {
         client.once(event.name, (...args) => event.execute(client, ...args));
     } else {
