@@ -94,22 +94,21 @@ client.on('interactionCreate', async interaction => {
 
 // Запуск
 (async () => {
-
     try {
         console.log("1");
-    
+
         await economy.initDatabase();
         console.log("2");
 
-        console.log("TOKEN:", process.env.DISCORD_TOKEN ? "Есть" : "Нет");
+        if (!process.env.DISCORD_TOKEN) {
+            throw new Error("DISCORD_TOKEN не найден");
+        }
 
         await client.login(process.env.DISCORD_TOKEN);
-        console.log("3!");
-
+        console.log("3");
+        
     } catch (error) {
-
         console.error('Ошибка запуска:', error);
-
+        process.exit(1);
     }
-
 })();
