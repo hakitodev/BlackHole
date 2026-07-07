@@ -1,7 +1,10 @@
 const { Client, GatewayIntentBits } = require('discord.js');
+console.log("indexStart");
 const fs = require('fs');
 const path = require('path');
+console.log("before economy");
 const economy = require('./Economy');
+console.log("after economy");
 
 const client = new Client({
     intents: [
