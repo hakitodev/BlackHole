@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { SERVERS } = require('../config');
+const { SERVERS } = require('../Config');
 
 module.exports = {
     name: 'guildMemberAdd',
