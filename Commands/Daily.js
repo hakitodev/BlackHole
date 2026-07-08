@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require("discord.js");
-const economy = require("../database/economy");
+const economy = require("../Database/Economy");
 
 const REWARD = 500;
 const COOLDOWN = 24 * 60 * 60 * 1000;
