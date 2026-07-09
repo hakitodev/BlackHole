@@ -10,7 +10,7 @@ console.log("3");
 const path = require('path');
 console.log("4");
 
-const economy = require('./Database/Economy');
+const economy = require('./Database/Economy.js');
 console.log("5");
 
 const client = new Client({
