@@ -1,14 +1,14 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const economy = require("../Database/Economy");
+const economy = require("../Database/Economy.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName("balance")
-        .setDescription("Посмотреть баланс")
+        .setName("bal")
+        .setDescription("See balance")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь")
+                .setDescription("User")
         ),
     async execute(interaction) {
         const member =
