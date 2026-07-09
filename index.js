@@ -1,10 +1,17 @@
+console.error("=== INDEX VERSION 12345 ===");
+console.log("1");
+
 const { Client, GatewayIntentBits } = require('discord.js');
-console.log("indexStart");
+console.log("2");
+
 const fs = require('fs');
+console.log("3");
+
 const path = require('path');
-console.log("before economy");
+console.log("4");
+
 const economy = require('./Database/Economy');
-console.log("after economy");
+console.log("5");
 
 const client = new Client({
     intents: [
@@ -27,8 +34,14 @@ function load(folder, callback) {
         .filter(file => file.endsWith('.js'));
 
     for (const file of files) {
-        const module = require(path.join(folderPath, file));
-        callback(module);
+        try {
+            console.log(`Loading ${folder}/${file}`);
+            const module = require(path.join(folderPath, file));
+            callback(module);
+        } catch (err) {
+            console.error(`Ошибка при загрузке ${folder}/${file}:`, err);
+            throw err;
+        }
     }
 }
 
@@ -109,6 +122,7 @@ client.on('interactionCreate', async interaction => {
 
         await client.login(process.env.DISCORD_TOKEN);
         console.log("3");
+        setInterval(() => {}, 1000);
         
     } catch (error) {
         console.error('Ошибка запуска:', error);
