@@ -3,11 +3,11 @@ const fs = require('fs');
 
 const commands = [];
 
-const commandFiles = fs.readdirSync('./commands');
+const commandFiles = fs.readdirSync('./Commands');
 
 for (const file of commandFiles) {
     try {
-        const command = require(`./commands/${file}`);
+        const command = require(`./Commands/${file}`);
         commands.push(command.data.toJSON());
         console.log(`✔ Загружена команда ${command.data.name}`);
     } catch (err) {
@@ -22,7 +22,7 @@ console.log(commands.map(c => c.name));
 
 async function deploy() {
   await rest.put(
-    Routes.applicationCommands('CLIENT_ID'),
+    Routes.applicationCommands('1107688235485896854'),
     { body: commands }
   );
 
