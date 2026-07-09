@@ -13,5 +13,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "build": "npm rebuild sqlite3"
   }
 }
