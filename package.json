@@ -15,6 +15,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "deploy": "node Deploy.js"
   }
 }
