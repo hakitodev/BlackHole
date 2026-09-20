@@ -13,6 +13,12 @@ const client = new Client({
 client.commands = new Map();
 client.buttons = new Map();
 
+const COMMAND_ALIASES = {
+    balance: "bal",
+    deposit: "dep",
+    withdraw: "with"
+};
+
 function load(folder, callback) {
     const folderPath = path.join(__dirname, folder);
 
@@ -56,8 +62,17 @@ load("Events", event => {
 client.on("interactionCreate", async interaction => {
     try {
         if (interaction.isChatInputCommand()) {
-            const command = client.commands.get(interaction.commandName);
-            if (!command) return;
+            const name = COMMAND_ALIASES[interaction.commandName] ?? interaction.commandName;
+            const command = client.commands.get(name);
+
+            if (!command) {
+                await interaction.reply({
+                    content: "Эта команда устарела. Напиши `/` заново или перезапусти Discord.",
+                    ephemeral: true
+                });
+                return;
+            }
+
             await command.execute(interaction);
             return;
         }

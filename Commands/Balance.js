@@ -12,9 +12,10 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        await interaction.deferReply();
+
         const member = interaction.options.getUser("user") ?? interaction.user;
         const user = await economy.getUser(member.id);
-        const total = user.balance + user.bank;
 
         const embed = new EmbedBuilder()
             .setColor(0xFEE75C)
@@ -23,9 +24,9 @@ module.exports = {
                 `**${member.username}**\n` +
                 `Наличные: **${user.balance}**\n` +
                 `Банк: **${user.bank}**\n` +
-                `Всего: **${total}**`
+                `Всего: **${user.balance + user.bank}**`
             );
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed] });
     }
 };

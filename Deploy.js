@@ -1,7 +1,7 @@
 const { REST, Routes } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
-const { CLIENT_ID } = require("./Config");
+const { CLIENT_ID, SERVERS } = require("./Config");
 
 const commands = [];
 const commandsPath = path.join(__dirname, "Commands");
@@ -29,13 +29,38 @@ if (!CLIENT_ID) {
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
+async function guildIds() {
+    const ids = new Set(Object.keys(SERVERS));
+
+    try {
+        const guilds = await rest.get(Routes.userGuilds());
+        for (const guild of guilds) {
+            ids.add(guild.id);
+        }
+    } catch (error) {
+        console.warn("Не удалось получить список серверов, чищу только Config:", error.message);
+    }
+
+    return [...ids];
+}
+
 async function deploy() {
     try {
+        for (const guildId of await guildIds()) {
+            await rest.put(
+                Routes.applicationGuildCommands(CLIENT_ID, guildId),
+                { body: [] }
+            );
+            console.log(`Серверные команды удалены: ${guildId}`);
+        }
+
         await rest.put(
             Routes.applicationCommands(CLIENT_ID),
             { body: commands }
         );
-        console.log(`Slash-команды опубликованы: ${commands.map(command => command.name).join(", ")}`);
+
+        console.log(`Актуальные команды: ${commands.map(command => command.name).join(", ")}`);
+        console.log("Старые серверные / сняты. Если в клиенте ещё видно лишнее — перезапусти Discord.");
     } catch (error) {
         console.error("Не удалось опубликовать команды:", error);
         process.exit(1);

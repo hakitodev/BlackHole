@@ -22,9 +22,15 @@ async function initDatabase() {
         driver: sqlite3.Database
     });
 
-    await db.exec("PRAGMA journal_mode = WAL;");
     await db.exec("PRAGMA busy_timeout = 5000;");
     await db.exec("PRAGMA foreign_keys = ON;");
+
+    try {
+        await db.exec("PRAGMA journal_mode = WAL;");
+    } catch (error) {
+        console.warn("WAL недоступен, использую обычный journal:", error.message);
+        await db.exec("PRAGMA journal_mode = DELETE;").catch(() => {});
+    }
 
     await db.exec(`
         CREATE TABLE IF NOT EXISTS users (
@@ -36,6 +42,37 @@ async function initDatabase() {
             daily INTEGER DEFAULT 0
         );
     `);
+
+    await ensureColumns();
+}
+
+async function ensureColumns() {
+    const columns = await db.all("PRAGMA table_info(users)");
+    const names = new Set(columns.map(column => column.name));
+    const required = {
+        balance: "INTEGER DEFAULT 0",
+        bank: "INTEGER DEFAULT 0",
+        xp: "INTEGER DEFAULT 0",
+        level: "INTEGER DEFAULT 1",
+        daily: "INTEGER DEFAULT 0"
+    };
+
+    for (const [name, definition] of Object.entries(required)) {
+        if (!names.has(name)) {
+            await db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
+        }
+    }
+}
+
+function asUser(row, id) {
+    return {
+        id: row?.id ?? id,
+        balance: Number(row?.balance) || 0,
+        bank: Number(row?.bank) || 0,
+        xp: Number(row?.xp) || 0,
+        level: Number(row?.level) || 1,
+        daily: Number(row?.daily) || 0
+    };
 }
 
 async function closeDatabase() {
@@ -46,8 +83,24 @@ async function closeDatabase() {
 }
 
 async function getUser(id) {
-    await db.run("INSERT OR IGNORE INTO users(id) VALUES(?)", id);
-    return db.get("SELECT * FROM users WHERE id = ?", id);
+    if (!db) {
+        throw new Error("База данных ещё не готова");
+    }
+
+    const userId = String(id);
+    await db.run("INSERT OR IGNORE INTO users(id) VALUES(?)", userId);
+
+    let row = await db.get("SELECT * FROM users WHERE id = ?", userId);
+
+    if (!row) {
+        await db.run(
+            "INSERT OR REPLACE INTO users(id, balance, bank, xp, level, daily) VALUES(?, 0, 0, 0, 1, 0)",
+            userId
+        );
+        row = await db.get("SELECT * FROM users WHERE id = ?", userId);
+    }
+
+    return asUser(row, userId);
 }
 
 async function addBalance(id, amount) {
