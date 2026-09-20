@@ -3,7 +3,7 @@ const { SERVERS } = require("../Config");
 const { getChannel } = require("../Utils/channel");
 
 module.exports = {
-    name: "guildMemberAdd",
+    name: "guildMemberRemove",
     async execute(client, member) {
         const config = SERVERS[member.guild.id];
         if (!config) return;
@@ -12,13 +12,13 @@ module.exports = {
         if (!channel) return;
 
         const embed = new EmbedBuilder()
-            .setColor(0x57F287)
+            .setColor(0xED4245)
             .setDescription(
-                config.welcomeMessage.replace("{user}", `<@${member.id}>`)
+                config.leaveMessage.replace("{user}", `<@${member.id}>`)
             );
 
         await channel.send({ embeds: [embed] }).catch(error => {
-            console.error(`welcome ${member.guild.id}:`, error);
+            console.error(`leave ${member.guild.id}:`, error);
         });
     }
 };

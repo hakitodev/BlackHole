@@ -1,11 +1,18 @@
-const { Client } = require('discord.js');
-const http = require('http');
+const http = require("http");
+
+const port = Number(process.env.PORT) || 3000;
 
 http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('BlackHole Bot is running!');
-}).listen(process.env.PORT || 3000);
+    if (req.url === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+    }
 
-console.log(`Keep-alive server started on port ${process.env.PORT || 3000}`);
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("BlackHole Bot is running");
+}).listen(port, () => {
+    console.log(`Keep-alive server started on port ${port}`);
+});
 
-require('./index.js');
+require("./index.js");

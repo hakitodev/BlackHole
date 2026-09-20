@@ -1,24 +1,12 @@
-console.error("=== INDEX VERSION 12345 ===");
-console.log("1");
-
-const { Client, GatewayIntentBits } = require('discord.js');
-console.log("2");
-
-const fs = require('fs');
-console.log("3");
-
-const path = require('path');
-console.log("4");
-
-const economy = require('./Database/Economy.js');
-console.log("5");
+const { Client, GatewayIntentBits } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+const economy = require("./Database/Economy");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.GuildMembers
     ]
 });
 
@@ -30,102 +18,93 @@ function load(folder, callback) {
 
     if (!fs.existsSync(folderPath)) return;
 
-    const files = fs.readdirSync(folderPath)
-        .filter(file => file.endsWith('.js'));
+    const files = fs.readdirSync(folderPath).filter(file => file.endsWith(".js"));
 
     for (const file of files) {
         try {
-            console.log(`Loading ${folder}/${file}`);
             const module = require(path.join(folderPath, file));
-            callback(module);
-        } catch (err) {
-            console.error(`Ошибка при загрузке ${folder}/${file}:`, err);
-            throw err;
+            callback(module, file);
+            console.log(`Loaded ${folder}/${file}`);
+        } catch (error) {
+            console.error(`Не удалось загрузить ${folder}/${file}:`, error);
         }
     }
 }
 
-// Команды
-load('Commands', command => {
+load("Commands", command => {
+    if (!command?.data?.name) return;
     client.commands.set(command.data.name, command);
 });
 
-// Кнопки
-load('Buttons', button => {
+load("Buttons", button => {
+    if (!button?.id) return;
     client.buttons.set(button.id, button);
 });
 
-// События
-load('Events', event => {
+load("Events", event => {
+    if (!event?.name || typeof event.execute !== "function") return;
+
+    const handler = (...args) => event.execute(client, ...args);
+
     if (event.once) {
-        client.once(event.name, (...args) => event.execute(client, ...args));
+        client.once(event.name, handler);
     } else {
-        client.on(event.name, (...args) => event.execute(client, ...args));
+        client.on(event.name, handler);
     }
 });
 
-// Обработка Slash-команд и кнопок
-client.on('interactionCreate', async interaction => {
-
+client.on("interactionCreate", async interaction => {
     try {
-
         if (interaction.isChatInputCommand()) {
-
             const command = client.commands.get(interaction.commandName);
-
             if (!command) return;
-
-            return await command.execute(interaction);
-
+            await command.execute(interaction);
+            return;
         }
 
         if (interaction.isButton()) {
-
-            const id = interaction.customId.split('_')[0];
-
+            const id = interaction.customId.split("_")[0];
             const button = client.buttons.get(id);
-
             if (!button) return;
-
-            return await button.execute(interaction);
-
+            await button.execute(interaction);
         }
-
     } catch (error) {
-
         console.error(error);
 
         const reply = {
-            content: '❌ Произошла ошибка при выполнении команды.',
+            content: "Произошла ошибка при выполнении команды.",
             ephemeral: true
         };
 
-        if (interaction.replied || interaction.deferred)
+        if (interaction.replied || interaction.deferred) {
             await interaction.followUp(reply).catch(() => {});
-        else
+        } else {
             await interaction.reply(reply).catch(() => {});
+        }
     }
-
 });
 
-// Запуск
+async function shutdown(signal) {
+    console.log(`Остановка (${signal})`);
+    client.destroy();
+    await economy.closeDatabase().catch(() => {});
+    process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
 (async () => {
     try {
-        console.log("1");
-
         await economy.initDatabase();
-        console.log("2");
 
         if (!process.env.DISCORD_TOKEN) {
             throw new Error("DISCORD_TOKEN не найден");
         }
 
         await client.login(process.env.DISCORD_TOKEN);
-        console.log("3");
-        setInterval(() => {}, 1000);
-        
     } catch (error) {
-        console.error('Ошибка запуска:', error);
+        console.error("Ошибка запуска:", error);
         process.exit(1);
     }
 })();
