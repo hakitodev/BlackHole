@@ -1,0 +1,7 @@
+{
+  "123456789012345678": {
+    "channelId": "123456789012345678",
+    "welcomeMessage": "Привет, {user}!",
+    "leaveMessage": "Прощай, {user}"
+  }
+}

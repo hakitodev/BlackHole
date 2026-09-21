@@ -5,26 +5,52 @@ const path = require("path");
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
 
 let db;
+let txQueue = Promise.resolve();
 
 function neededXp(level) {
     return 100 * Math.max(1, level);
 }
 
-async function withTransaction(work) {
-    await db.exec("BEGIN IMMEDIATE");
-    try {
-        const result = await work();
-        await db.exec("COMMIT");
-        return result;
-    } catch (error) {
-        await db.exec("ROLLBACK").catch(() => {});
-        throw error;
+function resolveDatabasePath(filename) {
+    if (filename) {
+        return filename;
     }
+
+    if (process.env.DATABASE_PATH) {
+        return process.env.DATABASE_PATH;
+    }
+
+    return path.join(__dirname, "database.sqlite");
 }
 
-async function initDatabase() {
+function enqueue(work) {
+    const run = txQueue.then(work, work);
+    txQueue = run.then(() => {}, () => {});
+    return run;
+}
+
+async function withTransaction(work) {
+    return enqueue(async () => {
+        await db.exec("BEGIN IMMEDIATE");
+        try {
+            const result = await work();
+            await db.exec("COMMIT");
+            return result;
+        } catch (error) {
+            await db.exec("ROLLBACK").catch(() => {});
+            throw error;
+        }
+    });
+}
+
+async function initDatabase(filename) {
+    if (db) {
+        await db.close();
+        db = null;
+    }
+
     db = await open({
-        filename: path.join(__dirname, "database.sqlite"),
+        filename: resolveDatabasePath(filename),
         driver: sqlite3.Database
     });
 

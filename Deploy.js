@@ -1,7 +1,7 @@
+const { CLIENT_ID, SERVERS } = require("./Config");
 const { REST, Routes } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
-const { CLIENT_ID, SERVERS } = require("./Config");
 
 const commands = [];
 const commandsPath = path.join(__dirname, "Commands");

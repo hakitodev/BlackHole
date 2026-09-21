@@ -1,24 +1,44 @@
-module.exports = {
-    CLIENT_ID: process.env.CLIENT_ID || "1107688235485896854",
-    OWNER_ID: process.env.OWNER_ID || "",
+require("./Utils/env");
 
-    SERVERS: {
-        "1103415582101098638": {
-            channelId: "1103415582101098641",
-            welcomeMessage: "Привет, {user}!\nДля общения авторизуйся в <#1125863671655051274>",
-            leaveMessage: "Прощай, {user}"
-        },
+const fs = require("fs");
+const path = require("path");
 
-        "1137847512565301319": {
-            channelId: "1137847513546764330",
-            welcomeMessage: "Привет, {user}!\nРад, что ты зашел к нам",
-            leaveMessage: "Прощай, {user}"
-        },
+function parseServers(raw, source) {
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return parsed;
+        }
 
-        "930865164000038943": {
-            channelId: "930907935176028200",
-            welcomeMessage: "{user},\nДля общения авторизуйся в\nTo communicate, log in to\n<#943053808781651989>",
-            leaveMessage: "Прощай, {user}"
+        console.warn(`${source}: нужен объект { guildId: { channelId, welcomeMessage, leaveMessage } }`);
+    } catch (error) {
+        console.warn(`Не удалось разобрать ${source}:`, error.message);
+    }
+
+    return null;
+}
+
+function loadServers() {
+    if (process.env.SERVERS_JSON) {
+        const fromEnv = parseServers(process.env.SERVERS_JSON, "SERVERS_JSON");
+        if (fromEnv) {
+            return fromEnv;
         }
     }
+
+    const filePath = process.env.SERVERS_FILE
+        ? path.resolve(process.env.SERVERS_FILE)
+        : path.join(__dirname, "servers.json");
+
+    if (!fs.existsSync(filePath)) {
+        return {};
+    }
+
+    return parseServers(fs.readFileSync(filePath, "utf8"), filePath) ?? {};
+}
+
+module.exports = {
+    CLIENT_ID: process.env.CLIENT_ID || "",
+    OWNER_ID: process.env.OWNER_ID || "",
+    SERVERS: loadServers()
 };

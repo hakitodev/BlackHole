@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "deploy": "node Deploy.js"
+    "deploy": "node Deploy.js",
+    "test": "node --test"
   },
   "dependencies": {
     "discord.js": "^14.15.3",
