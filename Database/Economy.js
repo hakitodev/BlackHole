@@ -2,7 +2,13 @@ const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
 const path = require("path");
 
+const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
+
 let db;
+
+function neededXp(level) {
+    return 100 * Math.max(1, level);
+}
 
 async function withTransaction(work) {
     await db.exec("BEGIN IMMEDIATE");
@@ -39,7 +45,27 @@ async function initDatabase() {
             bank INTEGER DEFAULT 0,
             xp INTEGER DEFAULT 0,
             level INTEGER DEFAULT 1,
-            daily INTEGER DEFAULT 0
+            daily INTEGER DEFAULT 0,
+            work INTEGER DEFAULT 0,
+            crime INTEGER DEFAULT 0,
+            rob INTEGER DEFAULT 0
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS inventory (
+            user_id TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            qty INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, item_id)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS staff (
+            user_id TEXT PRIMARY KEY,
+            added_by TEXT NOT NULL,
+            added_at INTEGER NOT NULL
         );
     `);
 
@@ -54,7 +80,10 @@ async function ensureColumns() {
         bank: "INTEGER DEFAULT 0",
         xp: "INTEGER DEFAULT 0",
         level: "INTEGER DEFAULT 1",
-        daily: "INTEGER DEFAULT 0"
+        daily: "INTEGER DEFAULT 0",
+        work: "INTEGER DEFAULT 0",
+        crime: "INTEGER DEFAULT 0",
+        rob: "INTEGER DEFAULT 0"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -71,7 +100,10 @@ function asUser(row, id) {
         bank: Number(row?.bank) || 0,
         xp: Number(row?.xp) || 0,
         level: Number(row?.level) || 1,
-        daily: Number(row?.daily) || 0
+        daily: Number(row?.daily) || 0,
+        work: Number(row?.work) || 0,
+        crime: Number(row?.crime) || 0,
+        rob: Number(row?.rob) || 0
     };
 }
 
@@ -101,6 +133,30 @@ async function getUser(id) {
     }
 
     return asUser(row, userId);
+}
+
+async function applyLevelUps(id) {
+    const user = await db.get("SELECT xp, level FROM users WHERE id = ?", id);
+    let xp = Number(user?.xp) || 0;
+    let level = Number(user?.level) || 1;
+    let leveled = 0;
+
+    while (xp >= neededXp(level) && level < 1000) {
+        xp -= neededXp(level);
+        level += 1;
+        leveled += 1;
+    }
+
+    if (leveled) {
+        await db.run(
+            "UPDATE users SET xp = ?, level = ? WHERE id = ?",
+            xp,
+            level,
+            id
+        );
+    }
+
+    return { xp, level, leveled };
 }
 
 async function addBalance(id, amount) {
@@ -141,31 +197,187 @@ async function setDaily(id, time) {
     );
 }
 
-async function claimDaily(id, reward, cooldownMs) {
+async function claimTimed(id, column, cooldownMs, payout, xpGain = 0) {
+    if (!COOLDOWN_COLUMNS.has(column)) {
+        throw new Error("Неизвестная колонка кулдауна");
+    }
+
     await getUser(id);
     const now = Date.now();
 
     return withTransaction(async () => {
         const result = await db.run(
             `UPDATE users
-             SET balance = balance + ?, daily = ?
-             WHERE id = ? AND (? - daily >= ?)`,
-            reward,
+             SET ${column} = ?, balance = balance + ?, xp = xp + ?
+             WHERE id = ? AND (? - ${column} >= ?)`,
             now,
+            payout,
+            xpGain,
             id,
             now,
             cooldownMs
         );
 
         if (result.changes === 0) {
-            const user = await db.get("SELECT daily FROM users WHERE id = ?", id);
+            const row = await db.get(`SELECT ${column} AS t FROM users WHERE id = ?`, id);
             return {
                 ok: false,
-                nextAt: (user?.daily ?? 0) + cooldownMs
+                nextAt: (row?.t ?? 0) + cooldownMs
             };
         }
 
-        return { ok: true, amount: reward };
+        const progress = await applyLevelUps(id);
+        return { ok: true, amount: payout, xp: xpGain, ...progress };
+    });
+}
+
+async function claimDaily(id, reward, cooldownMs, xpGain = 25) {
+    return claimTimed(id, "daily", cooldownMs, reward, xpGain);
+}
+
+async function claimWork(id, payout, cooldownMs, xpGain = 15) {
+    return claimTimed(id, "work", cooldownMs, payout, xpGain);
+}
+
+async function commitCrime(id, cooldownMs, success, payout, fine, xpGain = 20) {
+    await getUser(id);
+    const now = Date.now();
+
+    return withTransaction(async () => {
+        const ready = await db.run(
+            `UPDATE users SET crime = ? WHERE id = ? AND (? - crime >= ?)`,
+            now,
+            id,
+            now,
+            cooldownMs
+        );
+
+        if (ready.changes === 0) {
+            const row = await db.get("SELECT crime AS t FROM users WHERE id = ?", id);
+            return { ok: false, nextAt: (row?.t ?? 0) + cooldownMs };
+        }
+
+        if (success) {
+            await db.run(
+                "UPDATE users SET balance = balance + ?, xp = xp + ? WHERE id = ?",
+                payout,
+                xpGain,
+                id
+            );
+            const progress = await applyLevelUps(id);
+            return { ok: true, success: true, amount: payout, xp: xpGain, ...progress };
+        }
+
+        const paid = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            fine,
+            id,
+            fine
+        );
+
+        if (!paid.changes) {
+            await db.run("UPDATE users SET balance = 0 WHERE id = ?", id);
+            return { ok: true, success: false, amount: 0, wiped: true };
+        }
+
+        return { ok: true, success: false, amount: fine, wiped: false };
+    });
+}
+
+async function attemptRob(fromId, toId, cooldownMs, success, steal, fine) {
+    await getUser(fromId);
+    await getUser(toId);
+    const now = Date.now();
+
+    return withTransaction(async () => {
+        const target = await db.get("SELECT balance FROM users WHERE id = ?", toId);
+        const cash = Number(target?.balance) || 0;
+
+        if (cash < 50) {
+            return { ok: false, reason: "empty" };
+        }
+
+        const ready = await db.run(
+            `UPDATE users SET rob = ? WHERE id = ? AND (? - rob >= ?)`,
+            now,
+            fromId,
+            now,
+            cooldownMs
+        );
+
+        if (ready.changes === 0) {
+            const row = await db.get("SELECT rob AS t FROM users WHERE id = ?", fromId);
+            return { ok: false, reason: "cooldown", nextAt: (row?.t ?? 0) + cooldownMs };
+        }
+
+        if (!success) {
+            const paid = await db.run(
+                "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+                fine,
+                fromId,
+                fine
+            );
+
+            if (!paid.changes) {
+                await db.run("UPDATE users SET balance = 0 WHERE id = ?", fromId);
+                return { ok: true, success: false, amount: 0, wiped: true };
+            }
+
+            await db.run(
+                "UPDATE users SET balance = balance + ? WHERE id = ?",
+                fine,
+                toId
+            );
+            return { ok: true, success: false, amount: fine, wiped: false };
+        }
+
+        const amount = Math.min(steal, cash);
+        const stolen = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            amount,
+            toId,
+            amount
+        );
+
+        if (!stolen.changes) {
+            return { ok: false, reason: "empty" };
+        }
+
+        await db.run(
+            "UPDATE users SET balance = balance + ?, xp = xp + ? WHERE id = ?",
+            amount,
+            20,
+            fromId
+        );
+        const progress = await applyLevelUps(fromId);
+        return { ok: true, success: true, amount, ...progress };
+    });
+}
+
+async function flipBet(id, amount, win) {
+    await getUser(id);
+
+    return withTransaction(async () => {
+        const spent = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            amount,
+            id,
+            amount
+        );
+
+        if (spent.changes === 0) {
+            return { ok: false, reason: "insufficient" };
+        }
+
+        if (win) {
+            await db.run(
+                "UPDATE users SET balance = balance + ? WHERE id = ?",
+                amount * 2,
+                id
+            );
+        }
+
+        return { ok: true, win, amount };
     });
 }
 
@@ -195,7 +407,14 @@ async function transfer(fromId, toId, amount) {
     });
 }
 
-async function getTop(limit = 10) {
+async function getTop(limit = 10, type = "money") {
+    if (type === "level") {
+        return db.all(
+            "SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT ?",
+            limit
+        );
+    }
+
     return db.all(
         "SELECT * FROM users ORDER BY (balance + bank) DESC, balance DESC LIMIT ?",
         limit
@@ -236,6 +455,104 @@ async function withdraw(id, amount) {
     });
 }
 
+async function getInventory(id) {
+    await getUser(id);
+    return db.all(
+        "SELECT item_id, qty FROM inventory WHERE user_id = ? AND qty > 0 ORDER BY qty DESC",
+        String(id)
+    );
+}
+
+async function buyItem(id, itemId, price, qty) {
+    const cost = price * qty;
+    await getUser(id);
+
+    return withTransaction(async () => {
+        const spent = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            cost,
+            id,
+            cost
+        );
+
+        if (spent.changes === 0) {
+            return { ok: false, reason: "insufficient" };
+        }
+
+        await db.run(
+            `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
+             ON CONFLICT(user_id, item_id) DO UPDATE SET qty = qty + excluded.qty`,
+            String(id),
+            itemId,
+            qty
+        );
+
+        return { ok: true, cost };
+    });
+}
+
+async function takeBalance(id, amount) {
+    await getUser(id);
+
+    return withTransaction(async () => {
+        const row = await db.get(
+            "SELECT balance, bank FROM users WHERE id = ?",
+            id
+        );
+        const cash = Number(row?.balance) || 0;
+        const bank = Number(row?.bank) || 0;
+        const total = cash + bank;
+
+        if (total < amount) {
+            return { ok: false, total };
+        }
+
+        const fromCash = Math.min(amount, cash);
+        const fromBank = amount - fromCash;
+
+        await db.run(
+            "UPDATE users SET balance = balance - ?, bank = bank - ? WHERE id = ?",
+            fromCash,
+            fromBank,
+            id
+        );
+
+        return { ok: true, amount, fromCash, fromBank };
+    });
+}
+
+async function isStaff(id) {
+    const row = await db.get(
+        "SELECT user_id FROM staff WHERE user_id = ?",
+        String(id)
+    );
+    return Boolean(row);
+}
+
+async function addStaff(id, addedBy) {
+    const userId = String(id);
+    const result = await db.run(
+        `INSERT OR IGNORE INTO staff(user_id, added_by, added_at)
+         VALUES(?, ?, ?)`,
+        userId,
+        String(addedBy),
+        Date.now()
+    );
+    return result.changes > 0;
+}
+
+async function removeStaff(id) {
+    const result = await db.run(
+        "DELETE FROM staff WHERE user_id = ?",
+        String(id)
+    );
+    return result.changes > 0;
+}
+
+async function listStaff() {
+    return db.all("SELECT user_id, added_by, added_at FROM staff ORDER BY added_at ASC");
+}
+
 module.exports = {
     initDatabase,
     closeDatabase,
@@ -245,8 +562,20 @@ module.exports = {
     setBalance,
     setDaily,
     claimDaily,
+    claimWork,
+    commitCrime,
+    attemptRob,
+    flipBet,
     transfer,
     getTop,
     deposit,
-    withdraw
+    withdraw,
+    getInventory,
+    buyItem,
+    takeBalance,
+    isStaff,
+    addStaff,
+    removeStaff,
+    listStaff,
+    neededXp
 };

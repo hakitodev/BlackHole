@@ -16,7 +16,11 @@ client.buttons = new Map();
 const COMMAND_ALIASES = {
     balance: "bal",
     deposit: "dep",
-    withdraw: "with"
+    withdraw: "with",
+    inventory: "inv",
+    coinflip: "flip",
+    ball: "8ball",
+    eightball: "8ball"
 };
 
 function load(folder, callback) {
@@ -60,6 +64,18 @@ load("Events", event => {
 });
 
 client.on("interactionCreate", async interaction => {
+    if (interaction.isAutocomplete()) {
+        try {
+            const name = COMMAND_ALIASES[interaction.commandName] ?? interaction.commandName;
+            const command = client.commands.get(name);
+            if (!command?.autocomplete) return;
+            await command.autocomplete(interaction);
+        } catch (error) {
+            console.error(error);
+        }
+        return;
+    }
+
     try {
         if (interaction.isChatInputCommand()) {
             const name = COMMAND_ALIASES[interaction.commandName] ?? interaction.commandName;

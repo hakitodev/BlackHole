@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
+const { formatDuration } = require("../Utils/time");
 
 const REWARD = 500;
 const COOLDOWN = 24 * 60 * 60 * 1000;
@@ -17,19 +18,16 @@ module.exports = {
         );
 
         if (!result.ok) {
-            const hours = Math.max(
-                1,
-                Math.ceil((result.nextAt - Date.now()) / 3600000)
-            );
-
             return interaction.reply({
-                content: `Следующая награда через ${hours} ч.`,
+                content: `Следующая награда через ${formatDuration(result.nextAt - Date.now())}.`,
                 ephemeral: true
             });
         }
 
+        const levelUp = result.leveled ? `\nНовый уровень: **${result.level}**` : "";
+
         await interaction.reply({
-            content: `Ты получил **${result.amount}** монет!`
+            content: `Ты получил **${result.amount}** монет.${levelUp}`
         });
     }
 };

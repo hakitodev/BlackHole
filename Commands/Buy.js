@@ -1,0 +1,66 @@
+const { SlashCommandBuilder } = require("discord.js");
+const economy = require("../Database/Economy");
+const { get, list, format } = require("../Utils/shop");
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName("buy")
+        .setDescription("Купить предмет из магазина")
+        .addStringOption(option =>
+            option
+                .setName("item")
+                .setDescription("Предмет")
+                .setRequired(true)
+                .setAutocomplete(true)
+        )
+        .addIntegerOption(option =>
+            option
+                .setName("qty")
+                .setDescription("Количество")
+                .setMinValue(1)
+                .setMaxValue(20)
+        ),
+
+    async autocomplete(interaction) {
+        const focused = interaction.options.getFocused().toLowerCase();
+        const choices = list()
+            .filter(item =>
+                item.id.includes(focused) ||
+                item.name.toLowerCase().includes(focused)
+            )
+            .slice(0, 25);
+
+        await interaction.respond(
+            choices.map(item => ({
+                name: `${item.emoji} ${item.name} — ${item.price}`,
+                value: item.id
+            }))
+        );
+    },
+
+    async execute(interaction) {
+        const itemId = interaction.options.getString("item");
+        const qty = interaction.options.getInteger("qty") ?? 1;
+        const item = get(itemId);
+
+        if (!item) {
+            return interaction.reply({
+                content: "Такого предмета нет. Смотри /shop.",
+                ephemeral: true
+            });
+        }
+
+        const result = await economy.buyItem(interaction.user.id, item.id, item.price, qty);
+
+        if (!result.ok) {
+            return interaction.reply({
+                content: `Нужно **${item.price * qty}** монет наличными.`,
+                ephemeral: true
+            });
+        }
+
+        await interaction.reply(
+            `${interaction.user} купил ${format(item)} × **${qty}** за **${result.cost}** монет.`
+        );
+    }
+};

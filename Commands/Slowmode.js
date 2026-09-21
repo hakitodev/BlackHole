@@ -1,0 +1,50 @@
+const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName("slowmode")
+        .setDescription("Медленный режим канала")
+        .addIntegerOption(option =>
+            option
+                .setName("seconds")
+                .setDescription("0 чтобы выключить")
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(21600)
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+        .setDMPermission(false),
+
+    async execute(interaction) {
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+            return interaction.reply({
+                content: "Нужно право Manage Channels.",
+                ephemeral: true
+            });
+        }
+
+        if (!interaction.channel?.setRateLimitPerUser) {
+            return interaction.reply({
+                content: "В этом канале медленный режим недоступен.",
+                ephemeral: true
+            });
+        }
+
+        const seconds = interaction.options.getInteger("seconds");
+
+        try {
+            await interaction.channel.setRateLimitPerUser(seconds);
+        } catch {
+            return interaction.reply({
+                content: "Не удалось поставить медленный режим.",
+                ephemeral: true
+            });
+        }
+
+        await interaction.reply(
+            seconds
+                ? `Медленный режим: **${seconds}** сек.`
+                : "Медленный режим выключен."
+        );
+    }
+};

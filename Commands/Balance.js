@@ -4,7 +4,7 @@ const economy = require("../Database/Economy");
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("bal")
-        .setDescription("Показать баланс")
+        .setDescription("Баланс.")
         .addUserOption(option =>
             option
                 .setName("user")

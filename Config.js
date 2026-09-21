@@ -1,5 +1,6 @@
 module.exports = {
     CLIENT_ID: process.env.CLIENT_ID || "1107688235485896854",
+    OWNER_ID: process.env.OWNER_ID || "",
 
     SERVERS: {
         "1103415582101098638": {
