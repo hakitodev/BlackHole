@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { isOwner } = require("../Utils/staff");
 const { getJob } = require("../Utils/jobs");
+const { mergeBusinesses } = require("../Utils/business");
+const { forInteraction } = require("../Utils/scope");
 const { reply, COLOR } = require("../Utils/reply");
 
 function bar(xp, need) {
@@ -23,7 +25,13 @@ module.exports = {
 
     async execute(interaction) {
         const member = interaction.options.getUser("user") ?? interaction.user;
-        const user = await economy.getUser(member.id);
+        const { scope, settings } = await forInteraction(interaction);
+        const guildBiz = settings.bizGuild && interaction.guildId
+            ? await economy.listCatalog(interaction.guildId, "biz")
+            : [];
+        const defs = mergeBusinesses(settings.bizGlobal !== false, guildBiz);
+        const snap = await economy.snapshot(member.id, scope, settings, defs);
+        const user = snap.user;
         const need = economy.neededXp(user.level);
         const role = isOwner({ client: interaction.client, user: member })
             ? "Владелец"
@@ -31,15 +39,20 @@ module.exports = {
                 ? "Модер"
                 : null;
 
+        const pending = snap.pending.total
+            ? `\nБизнес: **${snap.pending.total}**`
+            : "";
+        const jobNote = snap.penalty.fired ? " (уволен за простой)" : "";
+
         const fields = [
             {
                 name: "Деньги",
-                value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nBTC: **${user.btc}**\nВсего: **${user.balance + user.bank}**`,
+                value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nBTC: **${user.btc}**\nВсего: **${user.balance + user.bank}**${pending}`,
                 inline: true
             },
             {
                 name: "Профессия",
-                value: getJob(user.job).name,
+                value: `${getJob(user.job).name}${jobNote}`,
                 inline: true
             },
             {

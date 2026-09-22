@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { JOBS, jobByQuery, getJob } = require("../Utils/jobs");
+const { JOBS, mergeJobs, getJobFrom, jobByQueryFrom } = require("../Utils/jobs");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -21,18 +22,27 @@ module.exports = {
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand(false) || "list";
-        const user = await economy.getUser(interaction.user.id);
-        const current = getJob(user.job);
+        const { scope, settings } = await forInteraction(interaction);
+        if (settings.jobsGlobal === false && !settings.jobsGuild) {
+            return error(interaction, "Работы выключены.");
+        }
+        const local = settings.jobsGuild && interaction.guildId
+            ? await economy.listCatalog(interaction.guildId, "job")
+            : [];
+        const jobs = mergeJobs(settings.jobsGlobal !== false, local);
+        const penalty = await economy.applyIdlePenalties(interaction.user.id, scope, settings);
+        const user = await economy.getUser(interaction.user.id, scope);
+        const current = getJobFrom(jobs.length ? jobs : JOBS, user.job);
 
         if (sub === "take") {
-            const job = jobByQuery(interaction.options.getString("name"));
+            const job = jobByQueryFrom(jobs, interaction.options.getString("name"));
             if (!job) {
                 return error(interaction, "Нет такой профессии.");
             }
             if (user.level < job.minLevel) {
                 return error(interaction, `Нужен **${job.minLevel}** уровень.`);
             }
-            await economy.setJob(interaction.user.id, job.id);
+            await economy.setJob(interaction.user.id, job.id, scope);
             return reply(interaction, {
                 color: COLOR.green,
                 description: `Теперь **${job.name}**. Work платит ×**${job.mult}**.`
@@ -40,14 +50,15 @@ module.exports = {
         }
 
         if (sub === "quit") {
-            await economy.setJob(interaction.user.id, "intern");
+            await economy.setJob(interaction.user.id, "intern", scope);
             return reply(interaction, {
                 color: COLOR.blurple,
                 description: "Снова стажёр."
             });
         }
 
-        const lines = JOBS.map(job => {
+        const fired = penalty.fired ? "Уволен за простой.\n" : "";
+        const lines = jobs.map(job => {
             const mark = current.id === job.id ? " ← ты" : "";
             const lock = user.level < job.minLevel ? " 🔒" : "";
             return `**${job.name}** · ур. ${job.minLevel} · ×${job.mult}${lock}${mark}`;
@@ -56,7 +67,7 @@ module.exports = {
         return reply(interaction, {
             color: COLOR.blurple,
             title: "Профессии",
-            description: lines.join("\n")
+            description: fired + (lines.join("\n") || "Пусто.")
         });
     }
 };

@@ -108,6 +108,56 @@ async function requireSenior(interaction) {
     return false;
 }
 
+async function guildAccess(userId, guild, client) {
+    const globalRank = await staffRank(userId, client);
+    if (globalRank >= RANK.owner) {
+        return { rank: RANK.owner, global: true, local: true, owner: true };
+    }
+    if (globalRank >= RANK.senior) {
+        return { rank: RANK.senior, global: true, local: true };
+    }
+    const isGuildOwner = Boolean(guild?.ownerId && String(guild.ownerId) === String(userId));
+    if (isGuildOwner) {
+        return { rank: RANK.mod, global: false, local: true, guildOwner: true };
+    }
+    const local = guild?.id ? await economy.getGuildStaffRank(guild.id, userId) : 0;
+    if (local >= RANK.mod) {
+        return { rank: RANK.mod, global: false, local: true };
+    }
+    if (globalRank >= RANK.mod) {
+        return { rank: RANK.mod, global: true, local: false };
+    }
+    return { rank: RANK.none, global: false, local: false };
+}
+
+async function canEditGlobalEco(interaction) {
+    return (await staffRank(interaction.user.id, interaction.client)) >= RANK.senior;
+}
+
+async function canEditGuildEco(interaction) {
+    const access = await guildAccess(interaction.user.id, interaction.guild, interaction.client);
+    return access.local && access.rank >= RANK.mod;
+}
+
+async function requireGuildEco(interaction) {
+    if (await canEditGuildEco(interaction)) {
+        return true;
+    }
+    await error(interaction, "Нужны права модератора сервера.");
+    return false;
+}
+
+async function requireGlobalOrGuildEco(interaction) {
+    if (await canEditGlobalEco(interaction)) {
+        return { global: true };
+    }
+    if (await canEditGuildEco(interaction)) {
+        return { global: false };
+    }
+    await error(interaction, "Нужно быть модератором.");
+    return null;
+}
+
 module.exports = {
     RANK,
     rankLabel,
@@ -120,5 +170,10 @@ module.exports = {
     isBotAdmin,
     requireOwner,
     requireStaff,
-    requireSenior
+    requireSenior,
+    guildAccess,
+    canEditGlobalEco,
+    canEditGuildEco,
+    requireGuildEco,
+    requireGlobalOrGuildEco
 };

@@ -5,6 +5,8 @@ const path = require("path");
 const { PREFIX, SERVERS } = require("../Config");
 const { parseIdList, snowflake } = require("../Utils/ids");
 const { parseWords } = require("../Utils/automod");
+const { moneyInt, FLIP_MAX_BET, ROB_MAX_STEAL, clampGuildCap, JOB_IDLE_MS, BIZ_IDLE_MS } = require("../Utils/limits");
+const { GLOBAL_SCOPE, normScope, isGuildScope } = require("../Utils/scope");
 
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
 const ROOT = path.join(__dirname, "..");
@@ -216,10 +218,81 @@ async function initDatabase(filename) {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_wallets (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            balance INTEGER DEFAULT 0,
+            bank INTEGER DEFAULT 0,
+            xp INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 1,
+            daily INTEGER DEFAULT 0,
+            work INTEGER DEFAULT 0,
+            crime INTEGER DEFAULT 0,
+            rob INTEGER DEFAULT 0,
+            username TEXT NOT NULL DEFAULT '',
+            avatar TEXT NOT NULL DEFAULT '',
+            btc INTEGER NOT NULL DEFAULT 0,
+            job TEXT NOT NULL DEFAULT '',
+            last_work INTEGER NOT NULL DEFAULT 0,
+            last_active INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_inventory (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            qty INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, item_id)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_businesses (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            unclaimed INTEGER NOT NULL DEFAULT 0,
+            last_tick INTEGER NOT NULL DEFAULT 0,
+            last_revenue_collect INTEGER NOT NULL DEFAULT 0,
+            stalled INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, type)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_staff (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            rank INTEGER NOT NULL DEFAULT 1,
+            added_by TEXT NOT NULL,
+            added_at INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS catalogs (
+            scope TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            extra TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (scope, kind, id)
+        );
+    `);
+
     await ensureColumns();
     await ensureGuildColumns();
     await ensureStaffColumns();
     await ensureCustomCommandColumns();
+    await ensureShopColumns();
+    await ensureBusinessColumns();
+    await migrateIndexes();
     await seedGlobalShop();
     await checkpoint();
 
@@ -243,7 +316,9 @@ async function ensureColumns() {
         username: "TEXT NOT NULL DEFAULT ''",
         avatar: "TEXT NOT NULL DEFAULT ''",
         btc: "INTEGER NOT NULL DEFAULT 0",
-        job: "TEXT NOT NULL DEFAULT ''"
+        job: "TEXT NOT NULL DEFAULT ''",
+        last_work: "INTEGER NOT NULL DEFAULT 0",
+        last_active: "INTEGER NOT NULL DEFAULT 0"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -283,7 +358,20 @@ async function ensureGuildColumns() {
         crime_min: "INTEGER NOT NULL DEFAULT 180",
         crime_max: "INTEGER NOT NULL DEFAULT 480",
         crime_fine_min: "INTEGER NOT NULL DEFAULT 80",
-        crime_fine_max: "INTEGER NOT NULL DEFAULT 220"
+        crime_fine_max: "INTEGER NOT NULL DEFAULT 220",
+        wallet_scope: "TEXT NOT NULL DEFAULT 'global'",
+        jobs_global: "INTEGER NOT NULL DEFAULT 1",
+        jobs_guild: "INTEGER NOT NULL DEFAULT 0",
+        biz_global: "INTEGER NOT NULL DEFAULT 1",
+        biz_guild: "INTEGER NOT NULL DEFAULT 0",
+        shop_global: "INTEGER NOT NULL DEFAULT 1",
+        shop_guild: "INTEGER NOT NULL DEFAULT 1",
+        earn_on: "INTEGER NOT NULL DEFAULT 1",
+        economy_on: "INTEGER NOT NULL DEFAULT 1",
+        penalties_on: "INTEGER NOT NULL DEFAULT 1",
+        paused: "INTEGER NOT NULL DEFAULT 0",
+        flip_max: "INTEGER NOT NULL DEFAULT 25000",
+        rob_max: "INTEGER NOT NULL DEFAULT 15000"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -299,6 +387,46 @@ async function ensureStaffColumns() {
     if (!names.has("rank")) {
         await db.exec("ALTER TABLE staff ADD COLUMN rank INTEGER NOT NULL DEFAULT 1");
     }
+}
+
+async function ensureShopColumns() {
+    const columns = await db.all("PRAGMA table_info(shop_items)");
+    const names = new Set(columns.map(column => column.name));
+    if (!names.has("kind")) {
+        await db.exec("ALTER TABLE shop_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'item'");
+    }
+    if (!names.has("extra")) {
+        await db.exec("ALTER TABLE shop_items ADD COLUMN extra TEXT NOT NULL DEFAULT ''");
+    }
+}
+
+async function ensureBusinessColumns() {
+    const columns = await db.all("PRAGMA table_info(businesses)");
+    const names = new Set(columns.map(column => column.name));
+    if (!names.has("last_revenue_collect")) {
+        await db.exec("ALTER TABLE businesses ADD COLUMN last_revenue_collect INTEGER NOT NULL DEFAULT 0");
+        await db.exec("UPDATE businesses SET last_revenue_collect = last_tick WHERE last_revenue_collect = 0");
+    }
+    if (!names.has("stalled")) {
+        await db.exec("ALTER TABLE businesses ADD COLUMN stalled INTEGER NOT NULL DEFAULT 0");
+    }
+}
+
+async function migrateIndexes() {
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_users_id ON users(id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_inventory_user ON inventory(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_businesses_user ON businesses(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_wallets_user ON guild_wallets(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_wallets_guild ON guild_wallets(guild_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_inv_user ON guild_inventory(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_inv_guild ON guild_inventory(guild_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_biz_user ON guild_businesses(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_biz_guild ON guild_businesses(guild_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_staff_guild ON guild_staff(guild_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_guild_staff_user ON guild_staff(user_id);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_shop_scope ON shop_items(scope);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_catalogs_scope ON catalogs(scope, kind);");
 }
 
 async function ensureCustomCommandColumns() {
@@ -354,9 +482,57 @@ async function seedGlobalShop() {
     }
 }
 
-function asUser(row, id) {
+function walletRef(scope, id) {
+    const sid = normScope(scope);
+    const userId = String(id);
+    if (isGuildScope(sid)) {
+        return {
+            sid,
+            userId,
+            table: "guild_wallets",
+            where: "guild_id = ? AND user_id = ?",
+            keys: [sid, userId]
+        };
+    }
     return {
-        id: row?.id ?? id,
+        sid: GLOBAL_SCOPE,
+        userId,
+        table: "users",
+        where: "id = ?",
+        keys: [userId]
+    };
+}
+
+function bizRef(scope, userId, type) {
+    const sid = normScope(scope);
+    const id = String(userId);
+    const kind = String(type || "");
+    if (isGuildScope(sid)) {
+        return {
+            table: "guild_businesses",
+            where: "guild_id = ? AND user_id = ? AND type = ?",
+            keys: [sid, id, kind],
+            listWhere: "guild_id = ? AND user_id = ?",
+            listKeys: [sid, id],
+            insert: "INSERT INTO guild_businesses(guild_id, user_id, type, level, unclaimed, last_tick, last_revenue_collect, stalled) VALUES(?, ?, ?, 1, 0, ?, ?, 0)",
+            insertKeys: (now) => [sid, id, kind, now, now]
+        };
+    }
+    return {
+        table: "businesses",
+        where: "user_id = ? AND type = ?",
+        keys: [id, kind],
+        listWhere: "user_id = ?",
+        listKeys: [id],
+        insert: "INSERT INTO businesses(user_id, type, level, unclaimed, last_tick, last_revenue_collect, stalled) VALUES(?, ?, 1, 0, ?, ?, 0)",
+        insertKeys: (now) => [id, kind, now, now]
+    };
+}
+
+function asUser(row, id, scope = GLOBAL_SCOPE) {
+    return {
+        id: row?.user_id ?? row?.id ?? id,
+        scope,
         balance: Number(row?.balance) || 0,
         bank: Number(row?.bank) || 0,
         xp: Number(row?.xp) || 0,
@@ -368,8 +544,44 @@ function asUser(row, id) {
         username: row?.username || "",
         avatar: row?.avatar || "",
         btc: Number(row?.btc) || 0,
-        job: row?.job || ""
+        job: row?.job || "",
+        lastWork: Number(row?.last_work) || 0,
+        lastActive: Number(row?.last_active) || 0
     };
+}
+
+async function getUser(id, scope = GLOBAL_SCOPE) {
+    if (!db) {
+        throw new Error("База данных ещё не готова");
+    }
+
+    const userId = String(id);
+    const sid = normScope(scope);
+
+    if (!isGuildScope(sid)) {
+        await db.run("INSERT OR IGNORE INTO users(id) VALUES(?)", userId);
+        let row = await db.get("SELECT * FROM users WHERE id = ?", userId);
+        if (!row) {
+            await db.run(
+                "INSERT OR REPLACE INTO users(id, balance, bank, xp, level, daily) VALUES(?, 0, 0, 0, 1, 0)",
+                userId
+            );
+            row = await db.get("SELECT * FROM users WHERE id = ?", userId);
+        }
+        return asUser(row, userId, GLOBAL_SCOPE);
+    }
+
+    await db.run(
+        "INSERT OR IGNORE INTO guild_wallets(guild_id, user_id) VALUES(?, ?)",
+        sid,
+        userId
+    );
+    const row = await db.get(
+        "SELECT * FROM guild_wallets WHERE guild_id = ? AND user_id = ?",
+        sid,
+        userId
+    );
+    return asUser(row, userId, sid);
 }
 
 async function closeDatabase() {
@@ -381,33 +593,15 @@ async function closeDatabase() {
     }
 }
 
-async function getUser(id) {
-    if (!db) {
-        throw new Error("База данных ещё не готова");
-    }
-
-    const userId = String(id);
-    await db.run("INSERT OR IGNORE INTO users(id) VALUES(?)", userId);
-
-    let row = await db.get("SELECT * FROM users WHERE id = ?", userId);
-
-    if (!row) {
-        await db.run(
-            "INSERT OR REPLACE INTO users(id, balance, bank, xp, level, daily) VALUES(?, 0, 0, 0, 1, 0)",
-            userId
-        );
-        row = await db.get("SELECT * FROM users WHERE id = ?", userId);
-    }
-
-    return asUser(row, userId);
-}
-
-async function applyLevelUps(id, moneyPerLevel = 250) {
-    const user = await db.get("SELECT xp, level FROM users WHERE id = ?", id);
+async function applyLevelUps(id, moneyPerLevel = 250, scope = GLOBAL_SCOPE) {
+    const sid = normScope(scope);
+    const user = isGuildScope(sid)
+        ? await db.get("SELECT xp, level FROM guild_wallets WHERE guild_id = ? AND user_id = ?", sid, id)
+        : await db.get("SELECT xp, level FROM users WHERE id = ?", id);
     let xp = Number(user?.xp) || 0;
     let level = Number(user?.level) || 1;
     let leveled = 0;
-    const payout = Math.max(0, Number(moneyPerLevel) || 0);
+    const payout = Math.max(0, moneyInt(moneyPerLevel, 0));
 
     while (xp >= neededXp(level) && level < 10000) {
         xp -= neededXp(level);
@@ -417,158 +611,267 @@ async function applyLevelUps(id, moneyPerLevel = 250) {
 
     if (leveled) {
         const money = payout * leveled;
-        await db.run(
-            "UPDATE users SET xp = ?, level = ?, balance = balance + ? WHERE id = ?",
-            xp,
-            level,
-            money,
-            id
-        );
+        if (isGuildScope(sid)) {
+            await db.run(
+                "UPDATE guild_wallets SET xp = ?, level = ?, balance = balance + ? WHERE guild_id = ? AND user_id = ?",
+                xp,
+                level,
+                money,
+                sid,
+                id
+            );
+        } else {
+            await db.run(
+                "UPDATE users SET xp = ?, level = ?, balance = balance + ? WHERE id = ?",
+                xp,
+                level,
+                money,
+                id
+            );
+        }
         return { xp, level, leveled, money };
     }
 
     return { xp, level, leveled: 0, money: 0 };
 }
 
-async function addXp(id, amount, moneyPerLevel = 250) {
-    await getUser(id);
-    await db.run("UPDATE users SET xp = xp + ? WHERE id = ?", amount, id);
-    return applyLevelUps(id, moneyPerLevel);
+async function addXp(id, amount, moneyPerLevel = 250, scope = GLOBAL_SCOPE) {
+    const gain = moneyInt(amount);
+    await getUser(id, scope);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        await db.run(
+            "UPDATE guild_wallets SET xp = xp + ? WHERE guild_id = ? AND user_id = ?",
+            gain,
+            sid,
+            id
+        );
+    } else {
+        await db.run("UPDATE users SET xp = xp + ? WHERE id = ?", gain, id);
+    }
+    return applyLevelUps(id, moneyPerLevel, scope);
 }
 
-async function addBalance(id, amount) {
-    await getUser(id);
-    await db.run(
+async function addXpBatch(entries) {
+    const results = [];
+    if (!entries?.length) {
+        return results;
+    }
+    return withTransaction(async () => {
+        for (const entry of entries) {
+            const progress = await addXp(
+                entry.userId,
+                entry.xp,
+                entry.moneyPerLevel,
+                entry.scope || GLOBAL_SCOPE
+            );
+            results.push({ ...entry, progress });
+        }
+        return results;
+    });
+}
+
+async function addBalance(id, amount, scope = GLOBAL_SCOPE) {
+    const delta = moneyInt(amount);
+    await getUser(id, scope);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        await db.run(
+            "UPDATE guild_wallets SET balance = balance + ? WHERE guild_id = ? AND user_id = ?",
+            delta,
+            sid,
+            String(id)
+        );
+    } else {
+        await db.run(
+            "UPDATE users SET balance = balance + ? WHERE id = ?",
+            delta,
+            id
+        );
+    }
+}
+
+async function cashSpend(id, amount, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        return db.run(
+            "UPDATE guild_wallets SET balance = balance - ? WHERE guild_id = ? AND user_id = ? AND balance >= ?",
+            bet,
+            sid,
+            String(id),
+            bet
+        );
+    }
+    return db.run(
+        "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+        bet,
+        id,
+        bet
+    );
+}
+
+async function cashAdd(id, amount, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        return db.run(
+            "UPDATE guild_wallets SET balance = balance + ? WHERE guild_id = ? AND user_id = ?",
+            bet,
+            sid,
+            String(id)
+        );
+    }
+    return db.run(
         "UPDATE users SET balance = balance + ? WHERE id = ?",
-        amount,
+        bet,
         id
     );
 }
 
-async function removeBalance(id, amount) {
-    await getUser(id);
-    const result = await db.run(
-        "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-        amount,
-        id,
-        amount
-    );
+async function removeBalance(id, amount, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const result = await cashSpend(id, amount, scope);
     return result.changes > 0;
 }
 
-async function setBalance(id, amount) {
-    await getUser(id);
+async function setBalance(id, amount, scope = GLOBAL_SCOPE) {
+    const value = moneyInt(amount);
+    await getUser(id, scope);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        await db.run(
+            "UPDATE guild_wallets SET balance = ? WHERE guild_id = ? AND user_id = ?",
+            value,
+            sid,
+            String(id)
+        );
+        return;
+    }
     await db.run(
         "UPDATE users SET balance = ? WHERE id = ?",
-        amount,
+        value,
         id
     );
 }
 
-async function setDaily(id, time) {
-    await getUser(id);
+async function setDaily(id, time, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
     await db.run(
-        "UPDATE users SET daily = ? WHERE id = ?",
+        `UPDATE ${w.table} SET daily = ? WHERE ${w.where}`,
         time,
-        id
+        ...w.keys
     );
 }
 
-async function claimTimed(id, column, cooldownMs, payout, xpGain = 0) {
+async function claimTimed(id, column, cooldownMs, payout, xpGain = 0, scope = GLOBAL_SCOPE) {
     if (!COOLDOWN_COLUMNS.has(column)) {
         throw new Error("Неизвестная колонка кулдауна");
     }
 
-    await getUser(id);
+    await getUser(id, scope);
     const now = Date.now();
+    const w = walletRef(scope, id);
+    const extra = column === "work"
+        ? ", last_work = ?, last_active = ?"
+        : ", last_active = ?";
+    const extraParams = column === "work" ? [now, now] : [now];
 
     return withTransaction(async () => {
         const result = await db.run(
-            `UPDATE users
-             SET ${column} = ?, balance = balance + ?, xp = xp + ?
-             WHERE id = ? AND (? - ${column} >= ?)`,
+            `UPDATE ${w.table}
+             SET ${column} = ?, balance = balance + ?, xp = xp + ?${extra}
+             WHERE ${w.where} AND (? - ${column} >= ?)`,
             now,
-            payout,
-            xpGain,
-            id,
+            moneyInt(payout),
+            moneyInt(xpGain),
+            ...extraParams,
+            ...w.keys,
             now,
             cooldownMs
         );
 
         if (result.changes === 0) {
-            const row = await db.get(`SELECT ${column} AS t FROM users WHERE id = ?`, id);
+            const row = await db.get(
+                `SELECT ${column} AS t FROM ${w.table} WHERE ${w.where}`,
+                ...w.keys
+            );
             return {
                 ok: false,
                 nextAt: (row?.t ?? 0) + cooldownMs
             };
         }
 
-        const progress = await applyLevelUps(id);
-        return { ok: true, amount: payout, xp: xpGain, ...progress };
+        const progress = await applyLevelUps(id, 250, scope);
+        return { ok: true, amount: moneyInt(payout), xp: moneyInt(xpGain), ...progress };
     });
 }
 
-async function claimDaily(id, reward, cooldownMs, xpGain = 25) {
-    return claimTimed(id, "daily", cooldownMs, reward, xpGain);
+async function claimDaily(id, reward, cooldownMs, xpGain = 25, scope = GLOBAL_SCOPE) {
+    return claimTimed(id, "daily", cooldownMs, reward, xpGain, scope);
 }
 
-async function claimWork(id, payout, cooldownMs, xpGain = 15) {
-    return claimTimed(id, "work", cooldownMs, payout, xpGain);
+async function claimWork(id, payout, cooldownMs, xpGain = 15, scope = GLOBAL_SCOPE) {
+    return claimTimed(id, "work", cooldownMs, payout, xpGain, scope);
 }
 
-async function commitCrime(id, cooldownMs, success, payout, fine, xpGain = 20) {
-    await getUser(id);
+async function commitCrime(id, cooldownMs, success, payout, fine, xpGain = 20, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
     const now = Date.now();
+    const w = walletRef(scope, id);
 
     return withTransaction(async () => {
         const ready = await db.run(
-            `UPDATE users SET crime = ? WHERE id = ? AND (? - crime >= ?)`,
+            `UPDATE ${w.table} SET crime = ?, last_active = ? WHERE ${w.where} AND (? - crime >= ?)`,
             now,
-            id,
+            now,
+            ...w.keys,
             now,
             cooldownMs
         );
 
         if (ready.changes === 0) {
-            const row = await db.get("SELECT crime AS t FROM users WHERE id = ?", id);
+            const row = await db.get(`SELECT crime AS t FROM ${w.table} WHERE ${w.where}`, ...w.keys);
             return { ok: false, nextAt: (row?.t ?? 0) + cooldownMs };
         }
 
         if (success) {
             await db.run(
-                "UPDATE users SET balance = balance + ?, xp = xp + ? WHERE id = ?",
-                payout,
-                xpGain,
-                id
+                `UPDATE ${w.table} SET balance = balance + ?, xp = xp + ? WHERE ${w.where}`,
+                moneyInt(payout),
+                moneyInt(xpGain),
+                ...w.keys
             );
-            const progress = await applyLevelUps(id);
-            return { ok: true, success: true, amount: payout, xp: xpGain, ...progress };
+            const progress = await applyLevelUps(id, 250, scope);
+            return { ok: true, success: true, amount: moneyInt(payout), xp: moneyInt(xpGain), ...progress };
         }
 
-        const paid = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            fine,
-            id,
-            fine
-        );
+        const paid = await cashSpend(id, fine, scope);
 
         if (!paid.changes) {
-            await db.run("UPDATE users SET balance = 0 WHERE id = ?", id);
+            await db.run(`UPDATE ${w.table} SET balance = 0 WHERE ${w.where}`, ...w.keys);
             return { ok: true, success: false, amount: 0, wiped: true };
         }
 
-        return { ok: true, success: false, amount: fine, wiped: false };
+        return { ok: true, success: false, amount: moneyInt(fine), wiped: false };
     });
 }
 
-async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCash = 1) {
-    await getUser(fromId);
-    await getUser(toId);
+async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCash = 1, maxSteal = ROB_MAX_STEAL, scope = GLOBAL_SCOPE) {
+    await getUser(fromId, scope);
+    await getUser(toId, scope);
     const now = Date.now();
-        const need = Math.max(1, Number(minCash) || 1);
+    const need = Math.max(1, Number(minCash) || 1);
+    const cap = Math.max(1, moneyInt(maxSteal, ROB_MAX_STEAL) || ROB_MAX_STEAL);
+    const thief = walletRef(scope, fromId);
+    const victim = walletRef(scope, toId);
 
     return withTransaction(async () => {
-        const target = await db.get("SELECT balance FROM users WHERE id = ?", toId);
+        const target = await db.get(
+            `SELECT balance FROM ${victim.table} WHERE ${victim.where}`,
+            ...victim.keys
+        );
         const cash = Number(target?.balance) || 0;
 
         if (cash < need) {
@@ -576,111 +879,82 @@ async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCas
         }
 
         const ready = await db.run(
-            `UPDATE users SET rob = ? WHERE id = ? AND (? - rob >= ?)`,
+            `UPDATE ${thief.table} SET rob = ?, last_active = ? WHERE ${thief.where} AND (? - rob >= ?)`,
             now,
-            fromId,
+            now,
+            ...thief.keys,
             now,
             cooldownMs
         );
 
         if (ready.changes === 0) {
-            const row = await db.get("SELECT rob AS t FROM users WHERE id = ?", fromId);
+            const row = await db.get(`SELECT rob AS t FROM ${thief.table} WHERE ${thief.where}`, ...thief.keys);
             return { ok: false, reason: "cooldown", nextAt: (row?.t ?? 0) + cooldownMs };
         }
 
         if (!success) {
-            const paid = await db.run(
-                "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-                fine,
-                fromId,
-                fine
-            );
+            const paid = await cashSpend(fromId, fine, scope);
 
             if (!paid.changes) {
-                await db.run("UPDATE users SET balance = 0 WHERE id = ?", fromId);
+                await db.run(`UPDATE ${thief.table} SET balance = 0 WHERE ${thief.where}`, ...thief.keys);
                 return { ok: true, success: false, amount: 0, wiped: true };
             }
 
-            await db.run(
-                "UPDATE users SET balance = balance + ? WHERE id = ?",
-                fine,
-                toId
-            );
-            return { ok: true, success: false, amount: fine, wiped: false };
+            await cashAdd(toId, fine, scope);
+            return { ok: true, success: false, amount: moneyInt(fine), wiped: false };
         }
 
-        const amount = Math.min(steal, cash);
-        const stolen = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            amount,
-            toId,
-            amount
-        );
+        const amount = Math.min(moneyInt(steal), cash, cap);
+        const stolen = await cashSpend(toId, amount, scope);
 
         if (!stolen.changes) {
             return { ok: false, reason: "empty" };
         }
 
         await db.run(
-            "UPDATE users SET balance = balance + ?, xp = xp + ? WHERE id = ?",
+            `UPDATE ${thief.table} SET balance = balance + ?, xp = xp + ? WHERE ${thief.where}`,
             amount,
             20,
-            fromId
+            ...thief.keys
         );
-        const progress = await applyLevelUps(fromId);
+        const progress = await applyLevelUps(fromId, 250, scope);
         return { ok: true, success: true, amount, ...progress };
     });
 }
 
-async function flipBet(id, amount, win) {
-    await getUser(id);
+async function flipBet(id, amount, win, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    if (bet < 1) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(id, scope);
 
     return withTransaction(async () => {
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            amount,
-            id,
-            amount
-        );
-
+        const spent = await cashSpend(id, bet, scope);
         if (spent.changes === 0) {
             return { ok: false, reason: "insufficient" };
         }
-
         if (win) {
-            await db.run(
-                "UPDATE users SET balance = balance + ? WHERE id = ?",
-                amount * 2,
-                id
-            );
+            await cashAdd(id, bet * 2, scope);
         }
-
-        return { ok: true, win, amount };
+        return { ok: true, win, amount: bet };
     });
 }
 
-async function transfer(fromId, toId, amount) {
-    await getUser(fromId);
-    await getUser(toId);
+async function transfer(fromId, toId, amount, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    if (bet < 1) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(fromId, scope);
+    await getUser(toId, scope);
 
     return withTransaction(async () => {
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            amount,
-            fromId,
-            amount
-        );
-
+        const spent = await cashSpend(fromId, bet, scope);
         if (spent.changes === 0) {
             return { ok: false, reason: "insufficient" };
         }
-
-        await db.run(
-            "UPDATE users SET balance = balance + ? WHERE id = ?",
-            amount,
-            toId
-        );
-
+        await cashAdd(toId, bet, scope);
         return { ok: true };
     });
 }
@@ -709,103 +983,155 @@ async function countUsers() {
     return Number(row?.n) || 0;
 }
 
-async function deposit(id, amount) {
-    await getUser(id);
+async function deposit(id, amount, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    if (bet < 1) {
+        return { ok: false };
+    }
+    await getUser(id, scope);
+    const sid = normScope(scope);
 
     return withTransaction(async () => {
+        if (isGuildScope(sid)) {
+            const result = await db.run(
+                `UPDATE guild_wallets
+                 SET balance = balance - ?, bank = bank + ?
+                 WHERE guild_id = ? AND user_id = ? AND balance >= ?`,
+                bet,
+                bet,
+                sid,
+                String(id),
+                bet
+            );
+            return { ok: result.changes > 0 };
+        }
         const result = await db.run(
             `UPDATE users
              SET balance = balance - ?, bank = bank + ?
              WHERE id = ? AND balance >= ?`,
-            amount,
-            amount,
+            bet,
+            bet,
             id,
-            amount
+            bet
         );
         return { ok: result.changes > 0 };
     });
 }
 
-async function withdraw(id, amount) {
-    await getUser(id);
+async function withdraw(id, amount, scope = GLOBAL_SCOPE) {
+    const bet = moneyInt(amount);
+    if (bet < 1) {
+        return { ok: false };
+    }
+    await getUser(id, scope);
+    const sid = normScope(scope);
 
     return withTransaction(async () => {
+        if (isGuildScope(sid)) {
+            const result = await db.run(
+                `UPDATE guild_wallets
+                 SET balance = balance + ?, bank = bank - ?
+                 WHERE guild_id = ? AND user_id = ? AND bank >= ?`,
+                bet,
+                bet,
+                sid,
+                String(id),
+                bet
+            );
+            return { ok: result.changes > 0 };
+        }
         const result = await db.run(
             `UPDATE users
              SET balance = balance + ?, bank = bank - ?
              WHERE id = ? AND bank >= ?`,
-            amount,
-            amount,
+            bet,
+            bet,
             id,
-            amount
+            bet
         );
         return { ok: result.changes > 0 };
     });
 }
 
-async function getInventory(id) {
-    await getUser(id);
+async function getInventory(id, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const sid = normScope(scope);
+    if (isGuildScope(sid)) {
+        return db.all(
+            "SELECT item_id, qty FROM guild_inventory WHERE guild_id = ? AND user_id = ? AND qty > 0 ORDER BY qty DESC",
+            sid,
+            String(id)
+        );
+    }
     return db.all(
         "SELECT item_id, qty FROM inventory WHERE user_id = ? AND qty > 0 ORDER BY qty DESC",
         String(id)
     );
 }
 
-async function buyItem(id, itemId, price, qty) {
-    const cost = price * qty;
-    await getUser(id);
+async function buyItem(id, itemId, price, qty, scope = GLOBAL_SCOPE) {
+    const cost = moneyInt(price) * Math.max(1, moneyInt(qty, 1));
+    await getUser(id, scope);
+    const sid = normScope(scope);
 
     return withTransaction(async () => {
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            cost,
-            id,
-            cost
-        );
-
+        const spent = await cashSpend(id, cost, scope);
         if (spent.changes === 0) {
             return { ok: false, reason: "insufficient" };
         }
 
-        await db.run(
-            `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
-             ON CONFLICT(user_id, item_id) DO UPDATE SET qty = qty + excluded.qty`,
-            String(id),
-            itemId,
-            qty
-        );
+        if (isGuildScope(sid)) {
+            await db.run(
+                `INSERT INTO guild_inventory(guild_id, user_id, item_id, qty) VALUES(?, ?, ?, ?)
+                 ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty`,
+                sid,
+                String(id),
+                itemId,
+                Math.max(1, moneyInt(qty, 1))
+            );
+        } else {
+            await db.run(
+                `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
+                 ON CONFLICT(user_id, item_id) DO UPDATE SET qty = qty + excluded.qty`,
+                String(id),
+                itemId,
+                Math.max(1, moneyInt(qty, 1))
+            );
+        }
 
         return { ok: true, cost };
     });
 }
 
-async function takeBalance(id, amount) {
-    await getUser(id);
+async function takeBalance(id, amount, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
+    const bet = moneyInt(amount);
 
     return withTransaction(async () => {
         const row = await db.get(
-            "SELECT balance, bank FROM users WHERE id = ?",
-            id
+            `SELECT balance, bank FROM ${w.table} WHERE ${w.where}`,
+            ...w.keys
         );
         const cash = Number(row?.balance) || 0;
         const bank = Number(row?.bank) || 0;
         const total = cash + bank;
 
-        if (total < amount) {
+        if (total < bet) {
             return { ok: false, total };
         }
 
-        const fromCash = Math.min(amount, cash);
-        const fromBank = amount - fromCash;
+        const fromCash = Math.min(bet, cash);
+        const fromBank = bet - fromCash;
 
         await db.run(
-            "UPDATE users SET balance = balance - ?, bank = bank - ? WHERE id = ?",
+            `UPDATE ${w.table} SET balance = balance - ?, bank = bank - ? WHERE ${w.where}`,
             fromCash,
             fromBank,
-            id
+            ...w.keys
         );
 
-        return { ok: true, amount, fromCash, fromBank };
+        return { ok: true, amount: bet, fromCash, fromBank };
     });
 }
 
@@ -1034,14 +1360,44 @@ function cleanItemId(id) {
     return String(id ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
 }
 
+function parseExtra(raw) {
+    if (!raw) {
+        return {};
+    }
+    if (typeof raw === "object") {
+        return raw;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+        const hex = String(raw).trim();
+        return /^#?[0-9a-fA-F]{6}$/.test(hex) ? { hex: hex.startsWith("#") ? hex : `#${hex}` } : {};
+    }
+}
+
+function cleanHex(value) {
+    const raw = String(value ?? "").trim();
+    const hex = raw.startsWith("#") ? raw.slice(1) : raw;
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        return `#${hex.toLowerCase()}`;
+    }
+    return "";
+}
+
 function asShopItem(row) {
+    const extra = parseExtra(row.extra);
+    const kind = row.kind === "role" ? "role" : "item";
     return {
         id: row.id,
         name: row.name,
         emoji: row.emoji || "",
         price: Number(row.price) || 0,
         description: row.description || "",
-        scope: row.scope
+        scope: row.scope,
+        kind,
+        extra,
+        hex: extra.hex || extra.color || ""
     };
 }
 
@@ -1053,12 +1409,15 @@ async function listShopItems(scope) {
     return rows.map(asShopItem);
 }
 
-async function listShop(guildId) {
+async function listShop(guildId, settings) {
+    const conf = settings || (guildId ? await getGuildSettings(guildId) : {});
     const map = new Map();
-    for (const item of await listShopItems("global")) {
-        map.set(item.id, item);
+    if (conf.shopGlobal !== false) {
+        for (const item of await listShopItems("global")) {
+            map.set(item.id, item);
+        }
     }
-    if (guildId) {
+    if (guildId && conf.shopGuild !== false) {
         for (const item of await listShopItems(String(guildId))) {
             map.set(item.id, item);
         }
@@ -1114,22 +1473,32 @@ async function saveShopItem(scope, item) {
         return { ok: false, reason: "invalid" };
     }
 
+    const kind = item.kind === "role" ? "role" : "item";
+    const extra = JSON.stringify({
+        ...parseExtra(item.extra),
+        hex: cleanHex(item.hex || item.color || parseExtra(item.extra).hex)
+    });
+
     await db.run(
-        `INSERT INTO shop_items(scope, id, name, emoji, price, description)
-         VALUES(?, ?, ?, ?, ?, ?)
+        `INSERT INTO shop_items(scope, id, name, emoji, price, description, kind, extra)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(scope, id) DO UPDATE SET
             name = excluded.name,
             emoji = excluded.emoji,
             price = excluded.price,
-            description = excluded.description`,
+            description = excluded.description,
+            kind = excluded.kind,
+            extra = excluded.extra`,
         String(scope),
         id,
         name,
         String(item.emoji ?? "").slice(0, 16),
-        Math.max(0, Math.min(100000000, Number(item.price) || 0)),
-        String(item.description ?? "").slice(0, 240)
+        Math.max(0, Math.min(100000000, moneyInt(item.price))),
+        String(item.description ?? "").slice(0, 240),
+        kind,
+        extra
     );
-    return { ok: true, id };
+    return { ok: true, id, kind };
 }
 
 async function deleteShopItem(scope, id) {
@@ -1141,12 +1510,13 @@ async function deleteShopItem(scope, id) {
     return result.changes > 0;
 }
 
-async function setWallet(id, patch = {}) {
-    return setUser(id, patch);
+async function setWallet(id, patch = {}, scope) {
+    return setUser(id, patch, scope);
 }
 
-async function setUser(id, patch = {}) {
-    await getUser(id);
+async function setUser(id, patch = {}, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
     const map = {
         balance: "balance",
         bank: "bank",
@@ -1156,25 +1526,35 @@ async function setUser(id, patch = {}) {
         work: "work",
         crime: "crime",
         rob: "rob",
-        btc: "btc"
+        btc: "btc",
+        lastWork: "last_work",
+        lastActive: "last_active"
     };
     for (const [key, column] of Object.entries(map)) {
         if (patch[key] === undefined) {
             continue;
         }
         const value = Math.max(0, Math.min(1e12, Math.floor(Number(patch[key]) || 0)));
-        await db.run(`UPDATE users SET ${column} = ? WHERE id = ?`, value, String(id));
+        await db.run(`UPDATE ${w.table} SET ${column} = ? WHERE ${w.where}`, value, ...w.keys);
     }
-    return getUser(id);
+    if (patch.job !== undefined) {
+        await db.run(
+            `UPDATE ${w.table} SET job = ? WHERE ${w.where}`,
+            String(patch.job ?? "").trim().slice(0, 32),
+            ...w.keys
+        );
+    }
+    return getUser(id, scope);
 }
 
-async function resetCooldowns(id) {
-    await getUser(id);
+async function resetCooldowns(id, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
     await db.run(
-        "UPDATE users SET daily = 0, work = 0, crime = 0, rob = 0 WHERE id = ?",
-        String(id)
+        `UPDATE ${w.table} SET daily = 0, work = 0, crime = 0, rob = 0 WHERE ${w.where}`,
+        ...w.keys
     );
-    return getUser(id);
+    return getUser(id, scope);
 }
 
 async function deleteUser(id) {
@@ -1185,25 +1565,46 @@ async function deleteUser(id) {
     return result.changes > 0;
 }
 
-async function setInventoryItem(userId, itemId, qty) {
+async function setInventoryItem(userId, itemId, qty, scope = GLOBAL_SCOPE) {
     const id = String(userId);
     const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
     const n = Math.floor(Number(qty) || 0);
-    await getUser(id);
+    await getUser(id, scope);
     if (!item) {
         return false;
     }
+    const sid = normScope(scope);
     if (n <= 0) {
-        await db.run("DELETE FROM inventory WHERE user_id = ? AND item_id = ?", id, item);
+        if (isGuildScope(sid)) {
+            await db.run(
+                "DELETE FROM guild_inventory WHERE guild_id = ? AND user_id = ? AND item_id = ?",
+                sid,
+                id,
+                item
+            );
+        } else {
+            await db.run("DELETE FROM inventory WHERE user_id = ? AND item_id = ?", id, item);
+        }
         return true;
     }
-    await db.run(
-        `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
-         ON CONFLICT(user_id, item_id) DO UPDATE SET qty = excluded.qty`,
-        id,
-        item,
-        n
-    );
+    if (isGuildScope(sid)) {
+        await db.run(
+            `INSERT INTO guild_inventory(guild_id, user_id, item_id, qty) VALUES(?, ?, ?, ?)
+             ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = excluded.qty`,
+            sid,
+            id,
+            item,
+            n
+        );
+    } else {
+        await db.run(
+            `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
+             ON CONFLICT(user_id, item_id) DO UPDATE SET qty = excluded.qty`,
+            id,
+            item,
+            n
+        );
+    }
     return true;
 }
 
@@ -1251,14 +1652,16 @@ async function touchProfile(id, patch = {}) {
     return getUser(userId);
 }
 
-async function setJob(id, job) {
-    await getUser(id);
+async function setJob(id, job, scope = GLOBAL_SCOPE) {
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
     await db.run(
-        "UPDATE users SET job = ? WHERE id = ?",
+        `UPDATE ${w.table} SET job = ?, last_work = ? WHERE ${w.where}`,
         String(job ?? "").trim().slice(0, 32),
-        String(id)
+        Date.now(),
+        ...w.keys
     );
-    return getUser(id);
+    return getUser(id, scope);
 }
 
 function asCustomCommand(row) {
@@ -1315,7 +1718,20 @@ function asGuildSettings(row, id) {
         crimeMin: Math.max(0, Number(row?.crime_min) || 180),
         crimeMax: Math.max(0, Number(row?.crime_max) || 480),
         crimeFineMin: Math.max(0, Number(row?.crime_fine_min) || 80),
-        crimeFineMax: Math.max(0, Number(row?.crime_fine_max) || 220)
+        crimeFineMax: Math.max(0, Number(row?.crime_fine_max) || 220),
+        walletScope: row?.wallet_scope === "guild" ? "guild" : "global",
+        jobsGlobal: row?.jobs_global == null ? true : Number(row.jobs_global) !== 0,
+        jobsGuild: Number(row?.jobs_guild) !== 0,
+        bizGlobal: row?.biz_global == null ? true : Number(row.biz_global) !== 0,
+        bizGuild: Number(row?.biz_guild) !== 0,
+        shopGlobal: row?.shop_global == null ? true : Number(row.shop_global) !== 0,
+        shopGuild: row?.shop_guild == null ? true : Number(row.shop_guild) !== 0,
+        earnOn: row?.earn_on == null ? true : Number(row.earn_on) !== 0,
+        economyOn: row?.economy_on == null ? true : Number(row.economy_on) !== 0,
+        penaltiesOn: row?.penalties_on == null ? true : Number(row.penalties_on) !== 0,
+        paused: Number(row?.paused) !== 0,
+        flipMax: Math.max(1, Number(row?.flip_max) || FLIP_MAX_BET),
+        robMax: Math.max(1, Number(row?.rob_max) || ROB_MAX_STEAL)
     };
 }
 
@@ -1427,7 +1843,20 @@ async function saveGuildSettings(guildId, patch) {
         crimeMin,
         crimeMax,
         crimeFineMin,
-        crimeFineMax
+        crimeFineMax,
+        walletScope: pick(patch, current, "walletScope") === "guild" ? "guild" : "global",
+        jobsGlobal: pick(patch, current, "jobsGlobal") ? 1 : 0,
+        jobsGuild: pick(patch, current, "jobsGuild") ? 1 : 0,
+        bizGlobal: pick(patch, current, "bizGlobal") ? 1 : 0,
+        bizGuild: pick(patch, current, "bizGuild") ? 1 : 0,
+        shopGlobal: pick(patch, current, "shopGlobal") ? 1 : 0,
+        shopGuild: pick(patch, current, "shopGuild") ? 1 : 0,
+        earnOn: pick(patch, current, "earnOn") ? 1 : 0,
+        economyOn: pick(patch, current, "economyOn") ? 1 : 0,
+        penaltiesOn: pick(patch, current, "penaltiesOn") ? 1 : 0,
+        paused: pick(patch, current, "paused") ? 1 : 0,
+        flipMax: clampGuildCap(pick(patch, current, "flipMax"), FLIP_MAX_BET),
+        robMax: clampGuildCap(pick(patch, current, "robMax"), ROB_MAX_STEAL)
     };
 
     await db.run(
@@ -1436,8 +1865,10 @@ async function saveGuildSettings(guildId, patch) {
             autorole_ids, log_channel, log_joins, log_messages, log_mod,
             levels_on, levels_channel, levels_message, automod_invites, automod_words,
             disabled_commands, xp_on, level_money,
-            daily_min, daily_max, work_min, work_max, crime_min, crime_max, crime_fine_min, crime_fine_max
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            daily_min, daily_max, work_min, work_max, crime_min, crime_max, crime_fine_min, crime_fine_max,
+            wallet_scope, jobs_global, jobs_guild, biz_global, biz_guild, shop_global, shop_guild,
+            earn_on, economy_on, penalties_on, paused, flip_max, rob_max
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
@@ -1465,7 +1896,20 @@ async function saveGuildSettings(guildId, patch) {
             crime_min = excluded.crime_min,
             crime_max = excluded.crime_max,
             crime_fine_min = excluded.crime_fine_min,
-            crime_fine_max = excluded.crime_fine_max`,
+            crime_fine_max = excluded.crime_fine_max,
+            wallet_scope = excluded.wallet_scope,
+            jobs_global = excluded.jobs_global,
+            jobs_guild = excluded.jobs_guild,
+            biz_global = excluded.biz_global,
+            biz_guild = excluded.biz_guild,
+            shop_global = excluded.shop_global,
+            shop_guild = excluded.shop_guild,
+            earn_on = excluded.earn_on,
+            economy_on = excluded.economy_on,
+            penalties_on = excluded.penalties_on,
+            paused = excluded.paused,
+            flip_max = excluded.flip_max,
+            rob_max = excluded.rob_max`,
         id,
         next.prefix,
         next.prefixText,
@@ -1493,7 +1937,20 @@ async function saveGuildSettings(guildId, patch) {
         next.crimeMin,
         next.crimeMax,
         next.crimeFineMin,
-        next.crimeFineMax
+        next.crimeFineMax,
+        next.walletScope,
+        next.jobsGlobal,
+        next.jobsGuild,
+        next.bizGlobal,
+        next.bizGuild,
+        next.shopGlobal,
+        next.shopGuild,
+        next.earnOn,
+        next.economyOn,
+        next.penaltiesOn,
+        next.paused,
+        next.flipMax,
+        next.robMax
     );
 
     return getGuildSettings(id);
@@ -1638,47 +2095,48 @@ async function btcPrice(now = Date.now()) {
     });
 }
 
-async function buyBtc(id, coins) {
+async function buyBtc(id, coins, scope = GLOBAL_SCOPE) {
     const qty = Math.max(0, Math.floor(Number(coins) || 0));
     if (qty < 1) {
         return { ok: false, reason: "invalid" };
     }
-    await getUser(id);
+    await getUser(id, scope);
 
     return withTransaction(async () => {
         const raw = await db.get("SELECT value FROM kv WHERE key = ?", "btc_price");
         const price = Math.max(BTC_MIN, Math.min(BTC_MAX, Number(raw?.value) || BTC_BASE));
         const cost = price * qty;
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ?, btc = btc + ? WHERE id = ? AND balance >= ?",
-            cost,
-            qty,
-            String(id),
-            cost
-        );
+        const spent = await cashSpend(id, cost, scope);
         if (!spent.changes) {
             return { ok: false, reason: "insufficient", price, cost };
         }
+        const w = walletRef(scope, id);
+        await db.run(
+            `UPDATE ${w.table} SET btc = btc + ? WHERE ${w.where}`,
+            qty,
+            ...w.keys
+        );
         return { ok: true, coins: qty, price, cost };
     });
 }
 
-async function sellBtc(id, coins) {
+async function sellBtc(id, coins, scope = GLOBAL_SCOPE) {
     const qty = Math.max(0, Math.floor(Number(coins) || 0));
     if (qty < 1) {
         return { ok: false, reason: "invalid" };
     }
-    await getUser(id);
+    await getUser(id, scope);
+    const w = walletRef(scope, id);
 
     return withTransaction(async () => {
         const raw = await db.get("SELECT value FROM kv WHERE key = ?", "btc_price");
         const price = Math.max(BTC_MIN, Math.min(BTC_MAX, Number(raw?.value) || BTC_BASE));
         const payout = price * qty;
         const sold = await db.run(
-            "UPDATE users SET btc = btc - ?, balance = balance + ? WHERE id = ? AND btc >= ?",
+            `UPDATE ${w.table} SET btc = btc - ?, balance = balance + ? WHERE ${w.where} AND btc >= ?`,
             qty,
             payout,
-            String(id),
+            ...w.keys,
             qty
         );
         if (!sold.changes) {
@@ -1692,86 +2150,94 @@ function asBusiness(row) {
     if (!row) {
         return null;
     }
+    const last = Number(row.last_revenue_collect) || Number(row.last_tick) || 0;
     return {
         userId: row.user_id,
         type: row.type,
         level: Math.max(1, Number(row.level) || 1),
         unclaimed: Math.max(0, Number(row.unclaimed) || 0),
-        lastTick: Number(row.last_tick) || 0
+        lastTick: last,
+        lastRevenueCollect: last,
+        stalled: Number(row.stalled) !== 0
     };
 }
 
 function businessYield(def, level, elapsedMs) {
-    const minutes = Math.max(0, elapsedMs) / 60000;
-    const rate = def.income * (1 + 0.25 * (Math.max(1, level) - 1));
-    return Math.floor(rate * minutes);
+    const seconds = Math.max(0, elapsedMs) / 1000;
+    const perMin = def.income * (1 + 0.25 * (Math.max(1, level) - 1));
+    return Math.floor((perMin / 60) * seconds);
 }
 
-function settleBusiness(row, def, now) {
+function settleBusiness(row, def, now, penaltiesOn = false) {
     const biz = asBusiness(row);
-    const gained = businessYield(def, biz.level, now - biz.lastTick);
+    const elapsed = Math.max(0, now - biz.lastRevenueCollect);
+    const idle = elapsed > BIZ_IDLE_MS;
+    if (penaltiesOn && (biz.stalled || idle)) {
+        return {
+            ...biz,
+            stalled: true,
+            unclaimed: biz.unclaimed,
+            lastTick: now,
+            lastRevenueCollect: biz.lastRevenueCollect
+        };
+    }
+    const gained = businessYield(def, biz.level, elapsed);
     const cap = def.cap * biz.level;
     return {
         ...biz,
+        stalled: false,
         unclaimed: Math.min(cap, biz.unclaimed + gained),
-        lastTick: now
+        lastTick: now,
+        lastRevenueCollect: now
     };
 }
 
-async function getBusiness(userId, type) {
+async function getBusiness(userId, type, scope = GLOBAL_SCOPE) {
+    const ref = bizRef(scope, userId, type);
     const row = await db.get(
-        "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
-        String(userId),
-        String(type)
+        `SELECT * FROM ${ref.table} WHERE ${ref.where}`,
+        ...ref.keys
     );
     return asBusiness(row);
 }
 
-async function listBusinesses(userId) {
+async function listBusinesses(userId, scope = GLOBAL_SCOPE) {
+    const ref = bizRef(scope, userId, "");
     const rows = await db.all(
-        "SELECT * FROM businesses WHERE user_id = ? ORDER BY type",
-        String(userId)
+        `SELECT * FROM ${ref.table} WHERE ${ref.listWhere} ORDER BY type`,
+        ...ref.listKeys
     );
     return rows.map(asBusiness);
 }
 
-async function buyBusiness(userId, type, def) {
-    await getUser(userId);
+async function buyBusiness(userId, type, def, scope = GLOBAL_SCOPE) {
+    await getUser(userId, scope);
+    const ref = bizRef(scope, userId, type);
     return withTransaction(async () => {
         const exists = await db.get(
-            "SELECT type FROM businesses WHERE user_id = ? AND type = ?",
-            String(userId),
-            type
+            `SELECT type FROM ${ref.table} WHERE ${ref.where}`,
+            ...ref.keys
         );
         if (exists) {
             return { ok: false, reason: "owned" };
         }
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            def.price,
-            String(userId),
-            def.price
-        );
+        const spent = await cashSpend(userId, def.price, scope);
         if (!spent.changes) {
             return { ok: false, reason: "insufficient" };
         }
-        await db.run(
-            "INSERT INTO businesses(user_id, type, level, unclaimed, last_tick) VALUES(?, ?, 1, 0, ?)",
-            String(userId),
-            type,
-            Date.now()
-        );
+        const now = Date.now();
+        await db.run(ref.insert, ...ref.insertKeys(now));
         return { ok: true };
     });
 }
 
-async function upgradeBusiness(userId, type, def) {
-    await getUser(userId);
+async function upgradeBusiness(userId, type, def, scope = GLOBAL_SCOPE) {
+    await getUser(userId, scope);
+    const ref = bizRef(scope, userId, type);
     return withTransaction(async () => {
         const row = await db.get(
-            "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
-            String(userId),
-            type
+            `SELECT * FROM ${ref.table} WHERE ${ref.where}`,
+            ...ref.keys
         );
         if (!row) {
             return { ok: false, reason: "missing" };
@@ -1781,132 +2247,383 @@ async function upgradeBusiness(userId, type, def) {
             return { ok: false, reason: "max", level };
         }
         const cost = Math.floor(def.price * level * 1.6);
-        const spent = await db.run(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            cost,
-            String(userId),
-            cost
-        );
+        const spent = await cashSpend(userId, cost, scope);
         if (!spent.changes) {
             return { ok: false, reason: "insufficient", cost };
         }
         await db.run(
-            "UPDATE businesses SET level = level + 1 WHERE user_id = ? AND type = ?",
-            String(userId),
-            type
+            `UPDATE ${ref.table} SET level = level + 1 WHERE ${ref.where}`,
+            ...ref.keys
         );
         return { ok: true, level: level + 1, cost };
     });
 }
 
-async function collectBusiness(userId, type, def) {
-    await getUser(userId);
-    const now = Date.now();
+async function collectBusiness(userId, type, def, options = {}) {
+    const scope = options.scope || GLOBAL_SCOPE;
+    const now = options.now || Date.now();
+    const penaltiesOn = Boolean(options.penaltiesOn);
+    await getUser(userId, scope);
+    const ref = bizRef(scope, userId, type);
     return withTransaction(async () => {
         const row = await db.get(
-            "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
-            String(userId),
-            type
+            `SELECT * FROM ${ref.table} WHERE ${ref.where}`,
+            ...ref.keys
         );
         if (!row) {
             return { ok: false, reason: "missing" };
         }
-        const settled = settleBusiness(row, def, now);
-        const amount = settled.unclaimed;
+        const settled = settleBusiness(row, def, now, penaltiesOn);
+        if (settled.stalled) {
+            return { ok: false, reason: "stalled", stalled: true };
+        }
+        const amount = moneyInt(settled.unclaimed);
         if (amount < 1) {
             await db.run(
-                "UPDATE businesses SET unclaimed = 0, last_tick = ? WHERE user_id = ? AND type = ?",
+                `UPDATE ${ref.table} SET unclaimed = 0, last_tick = ?, last_revenue_collect = ?, stalled = 0 WHERE ${ref.where}`,
                 now,
-                String(userId),
-                type
+                now,
+                ...ref.keys
             );
-            return { ok: false, reason: "empty" };
+            return { ok: false, reason: "empty", stalled: false };
         }
         await db.run(
-            "UPDATE businesses SET unclaimed = 0, last_tick = ? WHERE user_id = ? AND type = ?",
+            `UPDATE ${ref.table} SET unclaimed = 0, last_tick = ?, last_revenue_collect = ?, stalled = 0 WHERE ${ref.where}`,
             now,
-            String(userId),
-            type
+            now,
+            ...ref.keys
         );
+        await cashAdd(userId, amount, scope);
+        const w = walletRef(scope, userId);
         await db.run(
-            "UPDATE users SET balance = balance + ? WHERE id = ?",
-            amount,
-            String(userId)
+            `UPDATE ${w.table} SET last_active = ? WHERE ${w.where}`,
+            now,
+            ...w.keys
         );
         return { ok: true, amount, level: settled.level };
     });
 }
 
-async function peekBusiness(userId, type, def, now = Date.now()) {
+async function peekBusiness(userId, type, def, now = Date.now(), options = {}) {
+    const scope = options.scope || GLOBAL_SCOPE;
+    const penaltiesOn = Boolean(options.penaltiesOn);
+    const ref = bizRef(scope, userId, type);
     const row = await db.get(
-        "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
-        String(userId),
-        type
+        `SELECT * FROM ${ref.table} WHERE ${ref.where}`,
+        ...ref.keys
     );
     if (!row) {
         return null;
     }
-    return settleBusiness(row, def, now);
+    return settleBusiness(row, def, now, penaltiesOn);
 }
 
-async function consumeItem(id, itemId, qty = 1) {
+function restartFee(def) {
+    return Math.max(100, Math.floor(moneyInt(def?.price) * 0.05));
+}
+
+async function restartBusiness(userId, type, def, options = {}) {
+    const scope = options.scope || GLOBAL_SCOPE;
+    const now = options.now || Date.now();
+    const fee = restartFee(def);
+    await getUser(userId, scope);
+    const ref = bizRef(scope, userId, type);
+    return withTransaction(async () => {
+        const row = await db.get(
+            `SELECT * FROM ${ref.table} WHERE ${ref.where}`,
+            ...ref.keys
+        );
+        if (!row) {
+            return { ok: false, reason: "missing" };
+        }
+        const spent = await cashSpend(userId, fee, scope);
+        if (!spent.changes) {
+            return { ok: false, reason: "insufficient", fee };
+        }
+        await db.run(
+            `UPDATE ${ref.table} SET stalled = 0, unclaimed = 0, last_tick = ?, last_revenue_collect = ? WHERE ${ref.where}`,
+            now,
+            now,
+            ...ref.keys
+        );
+        return { ok: true, fee };
+    });
+}
+
+async function pendingBusinessIncome(userId, defs, options = {}) {
+    const now = options.now || Date.now();
+    let total = 0;
+    let stalled = 0;
+    const items = [];
+    for (const def of defs || []) {
+        const peek = await peekBusiness(userId, def.id, def, now, options);
+        if (!peek) {
+            continue;
+        }
+        total += moneyInt(peek.unclaimed);
+        if (peek.stalled) {
+            stalled += 1;
+        }
+        items.push({ def, biz: peek });
+    }
+    return { total, stalled, items, count: items.length };
+}
+
+async function applyIdlePenalties(userId, scope = GLOBAL_SCOPE, settings = {}) {
+    const user = await getUser(userId, scope);
+    const w = walletRef(scope, userId);
+    await db.run(
+        `UPDATE ${w.table} SET last_active = ? WHERE ${w.where}`,
+        Date.now(),
+        ...w.keys
+    );
+    if (!settings?.penaltiesOn) {
+        return { fired: false, user };
+    }
+    if (!user.job || user.job === "intern") {
+        return { fired: false, user };
+    }
+    if (!user.lastWork) {
+        return { fired: false, user };
+    }
+    if (Date.now() - user.lastWork < JOB_IDLE_MS) {
+        return { fired: false, user };
+    }
+    await db.run(
+        `UPDATE ${w.table} SET job = ? WHERE ${w.where}`,
+        "intern",
+        ...w.keys
+    );
+    return { fired: true, job: user.job, user: await getUser(userId, scope) };
+}
+
+async function snapshot(userId, scope = GLOBAL_SCOPE, settings = {}, defs = []) {
+    const penalty = await applyIdlePenalties(userId, scope, settings);
+    const user = penalty.user || await getUser(userId, scope);
+    const pending = await pendingBusinessIncome(userId, defs, {
+        scope,
+        penaltiesOn: Boolean(settings?.penaltiesOn)
+    });
+    return { user, penalty, pending };
+}
+
+async function getGuildStaffRank(guildId, userId) {
+    if (!guildId || !userId) {
+        return 0;
+    }
+    const row = await db.get(
+        "SELECT rank FROM guild_staff WHERE guild_id = ? AND user_id = ?",
+        String(guildId),
+        String(userId)
+    );
+    return Number(row?.rank) || 0;
+}
+
+async function addGuildStaff(guildId, userId, addedBy, rank = STAFF_RANK.mod) {
+    const gid = String(guildId);
+    const uid = String(userId);
+    const existed = await getGuildStaffRank(gid, uid);
+    await db.run(
+        `INSERT INTO guild_staff(guild_id, user_id, rank, added_by, added_at)
+         VALUES(?, ?, ?, ?, ?)
+         ON CONFLICT(guild_id, user_id) DO UPDATE SET
+            rank = excluded.rank,
+            added_by = excluded.added_by`,
+        gid,
+        uid,
+        Number(rank) >= 2 ? STAFF_RANK.senior : STAFF_RANK.mod,
+        String(addedBy),
+        Date.now()
+    );
+    return { created: existed === 0, rank: Number(rank) >= 2 ? STAFF_RANK.senior : STAFF_RANK.mod };
+}
+
+async function removeGuildStaff(guildId, userId) {
+    const result = await db.run(
+        "DELETE FROM guild_staff WHERE guild_id = ? AND user_id = ?",
+        String(guildId),
+        String(userId)
+    );
+    return result.changes > 0;
+}
+
+async function listGuildStaff(guildId) {
+    return db.all(
+        "SELECT user_id, added_by, added_at, rank FROM guild_staff WHERE guild_id = ? ORDER BY added_at ASC",
+        String(guildId)
+    );
+}
+
+async function listGuildStaffForUser(userId) {
+    return db.all(
+        "SELECT guild_id, user_id, rank FROM guild_staff WHERE user_id = ?",
+        String(userId)
+    );
+}
+
+function asCatalog(row) {
+    if (!row) {
+        return null;
+    }
+    return {
+        scope: row.scope,
+        kind: row.kind,
+        id: row.id,
+        name: row.name,
+        extra: parseExtra(row.extra)
+    };
+}
+
+async function listCatalog(scope, kind) {
+    const rows = await db.all(
+        "SELECT * FROM catalogs WHERE scope = ? AND kind = ? ORDER BY name",
+        String(scope),
+        String(kind)
+    );
+    return rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        ...parseExtra(row.extra)
+    }));
+}
+
+async function saveCatalogItem(scope, kind, item) {
+    const id = cleanItemId(item.id);
+    const name = String(item.name ?? "").trim().slice(0, 64);
+    if (!id || !name) {
+        return { ok: false, reason: "invalid" };
+    }
+    const extra = {
+        emoji: String(item.emoji ?? "").slice(0, 16),
+        price: moneyInt(item.price),
+        income: moneyInt(item.income),
+        cap: moneyInt(item.cap) || 1000,
+        maxLevel: Math.max(1, moneyInt(item.maxLevel, 10) || 10),
+        minLevel: Math.max(1, moneyInt(item.minLevel, 1) || 1),
+        mult: Math.max(0.1, Number(item.mult) || 1),
+        cooldown: moneyInt(item.cooldown)
+    };
+    await db.run(
+        `INSERT INTO catalogs(scope, kind, id, name, extra)
+         VALUES(?, ?, ?, ?, ?)
+         ON CONFLICT(scope, kind, id) DO UPDATE SET
+            name = excluded.name,
+            extra = excluded.extra`,
+        String(scope),
+        String(kind),
+        id,
+        name,
+        JSON.stringify(extra)
+    );
+    return { ok: true, id };
+}
+
+async function deleteCatalogItem(scope, kind, id) {
+    const result = await db.run(
+        "DELETE FROM catalogs WHERE scope = ? AND kind = ? AND id = ?",
+        String(scope),
+        String(kind),
+        cleanItemId(id)
+    );
+    return result.changes > 0;
+}
+
+async function consumeItem(id, itemId, qty = 1, scope = GLOBAL_SCOPE) {
     const userId = String(id);
     const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
     const n = Math.max(1, Math.floor(Number(qty) || 1));
     if (!item) {
         return { ok: false, reason: "invalid" };
     }
-    await getUser(userId);
+    await getUser(userId, scope);
+    const sid = normScope(scope);
 
     return withTransaction(async () => {
-        const taken = await db.run(
-            "UPDATE inventory SET qty = qty - ? WHERE user_id = ? AND item_id = ? AND qty >= ?",
-            n,
-            userId,
-            item,
-            n
-        );
+        let taken;
+        if (isGuildScope(sid)) {
+            taken = await db.run(
+                "UPDATE guild_inventory SET qty = qty - ? WHERE guild_id = ? AND user_id = ? AND item_id = ? AND qty >= ?",
+                n,
+                sid,
+                userId,
+                item,
+                n
+            );
+        } else {
+            taken = await db.run(
+                "UPDATE inventory SET qty = qty - ? WHERE user_id = ? AND item_id = ? AND qty >= ?",
+                n,
+                userId,
+                item,
+                n
+            );
+        }
         if (!taken.changes) {
             return { ok: false, reason: "missing" };
         }
-        await db.run(
-            "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
-            userId,
-            item
-        );
+        if (isGuildScope(sid)) {
+            await db.run(
+                "DELETE FROM guild_inventory WHERE guild_id = ? AND user_id = ? AND item_id = ? AND qty <= 0",
+                sid,
+                userId,
+                item
+            );
+        } else {
+            await db.run(
+                "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
+                userId,
+                item
+            );
+        }
         return { ok: true };
     });
 }
 
-async function openBox(id, itemId, payout) {
+async function openBox(id, itemId, payout, scope = GLOBAL_SCOPE) {
     const userId = String(id);
     const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
     const amount = Math.max(0, Math.floor(Number(payout) || 0));
     if (!item) {
         return { ok: false, reason: "invalid" };
     }
-    await getUser(userId);
+    await getUser(userId, scope);
+    const sid = normScope(scope);
 
     return withTransaction(async () => {
-        const taken = await db.run(
-            "UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item_id = ? AND qty >= 1",
-            userId,
-            item
-        );
+        let taken;
+        if (isGuildScope(sid)) {
+            taken = await db.run(
+                "UPDATE guild_inventory SET qty = qty - 1 WHERE guild_id = ? AND user_id = ? AND item_id = ? AND qty >= 1",
+                sid,
+                userId,
+                item
+            );
+        } else {
+            taken = await db.run(
+                "UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item_id = ? AND qty >= 1",
+                userId,
+                item
+            );
+        }
         if (!taken.changes) {
             return { ok: false, reason: "missing" };
         }
-        await db.run(
-            "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
-            userId,
-            item
-        );
-        if (amount > 0) {
+        if (isGuildScope(sid)) {
             await db.run(
-                "UPDATE users SET balance = balance + ? WHERE id = ?",
-                amount,
-                userId
+                "DELETE FROM guild_inventory WHERE guild_id = ? AND user_id = ? AND item_id = ? AND qty <= 0",
+                sid,
+                userId,
+                item
             );
+        } else {
+            await db.run(
+                "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
+                userId,
+                item
+            );
+        }
+        if (amount > 0) {
+            await cashAdd(userId, amount, scope);
         }
         return { ok: true, amount };
     });
@@ -1916,11 +2633,15 @@ module.exports = {
     initDatabase,
     closeDatabase,
     resolveDatabasePath,
+    GLOBAL_SCOPE,
     getUser,
     addXp,
+    addXpBatch,
     addBalance,
     removeBalance,
     setBalance,
+    cashSpend,
+    cashAdd,
     setDaily,
     claimDaily,
     claimWork,
@@ -1941,6 +2662,11 @@ module.exports = {
     addStaff,
     removeStaff,
     listStaff,
+    getGuildStaffRank,
+    addGuildStaff,
+    removeGuildStaff,
+    listGuildStaff,
+    listGuildStaffForUser,
     SESSION_TTL,
     saveWebSession,
     getWebSession,
@@ -1982,6 +2708,14 @@ module.exports = {
     upgradeBusiness,
     collectBusiness,
     peekBusiness,
+    restartBusiness,
+    restartFee,
+    pendingBusinessIncome,
+    applyIdlePenalties,
+    snapshot,
+    listCatalog,
+    saveCatalogItem,
+    deleteCatalogItem,
     consumeItem,
     openBox
 };

@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { requireSenior } = require("../Utils/staff");
+const { requireGlobalOrGuildEco } = require("../Utils/staff");
+const { forInteraction, GLOBAL_SCOPE } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -27,7 +28,8 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        if (!(await requireSenior(interaction))) {
+        const access = await requireGlobalOrGuildEco(interaction);
+        if (!access) {
             return;
         }
 
@@ -36,11 +38,16 @@ module.exports = {
             return error(interaction, target?.bot ? "У ботов нет кошелька." : "Укажи пользователя.");
         }
 
+        const { scope } = await forInteraction(interaction);
+        if (!access.global && scope === GLOBAL_SCOPE) {
+            return error(interaction, "Серверные модеры не трогают всемирный кошелёк.");
+        }
+
         const balance = interaction.options.getInteger("balance");
         const bank = interaction.options.getInteger("bank");
 
         if (balance === null && bank === null) {
-            const user = await economy.getUser(target.id);
+            const user = await economy.getUser(target.id, scope);
             return reply(interaction, {
                 color: COLOR.gold,
                 title: target.username,
@@ -52,7 +59,7 @@ module.exports = {
         const next = await economy.setWallet(target.id, {
             balance: balance ?? undefined,
             bank: bank ?? undefined
-        });
+        }, scope);
 
         return reply(interaction, {
             color: COLOR.gold,

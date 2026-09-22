@@ -1,7 +1,9 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { requireSenior } = require("../Utils/staff");
+const { requireGlobalOrGuildEco } = require("../Utils/staff");
 const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { PAY_MAX } = require("../Utils/limits");
+const { forInteraction, GLOBAL_SCOPE } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -22,7 +24,8 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        if (!(await requireSenior(interaction))) {
+        const access = await requireGlobalOrGuildEco(interaction);
+        if (!access) {
             return;
         }
 
@@ -36,8 +39,15 @@ module.exports = {
             return error(interaction, "У ботов нет кошелька.");
         }
 
-        const user = await economy.getUser(target.id);
+        const { scope } = await forInteraction(interaction);
+        if (!access.global && scope === GLOBAL_SCOPE) {
+            return error(interaction, "Серверные модеры не трогают всемирный кошелёк. Включи гильдийную экономику.");
+        }
+
+        const user = await economy.getUser(target.id, scope);
         const parsed = parseAmount(rawAmount(interaction), {
+            min: 1,
+            max: PAY_MAX,
             available: user.balance + user.bank
         });
 
@@ -45,7 +55,7 @@ module.exports = {
             return error(interaction, amountMessage(parsed));
         }
 
-        const result = await economy.takeBalance(target.id, parsed.amount);
+        const result = await economy.takeBalance(target.id, parsed.amount, scope);
 
         if (!result.ok) {
             return error(interaction, `Всего у ${target}: **${result.total}**.`);

@@ -28,10 +28,53 @@ function incomePerMin(def, level) {
     return def.income * (1 + 0.25 * (Math.max(1, level) - 1));
 }
 
+function fromCatalog(row) {
+    return {
+        id: row.id,
+        name: row.name,
+        emoji: row.emoji || "🏢",
+        price: Math.max(0, Number(row.price) || 0),
+        income: Math.max(0, Number(row.income) || 0),
+        cap: Math.max(1, Number(row.cap) || 1000),
+        maxLevel: Math.max(1, Number(row.maxLevel) || 10)
+    };
+}
+
+function mergeBusinesses(globalOn, guildItems = []) {
+    const map = new Map();
+    if (globalOn !== false) {
+        for (const item of BUSINESSES) {
+            map.set(item.id, item);
+        }
+    }
+    for (const item of guildItems) {
+        if (!item?.id) {
+            continue;
+        }
+        map.set(item.id, fromCatalog(item));
+    }
+    return [...map.values()];
+}
+
+function getBusinessFrom(list, id) {
+    return list.find(item => item.id === String(id || "")) || null;
+}
+
+function byQueryFrom(list, query) {
+    const q = String(query ?? "").trim().toLowerCase();
+    if (!q) {
+        return null;
+    }
+    return list.find(item => item.id === q || item.name.toLowerCase() === q) || null;
+}
+
 module.exports = {
     BUSINESSES,
     getBusiness,
     byQuery,
     upgradeCost,
-    incomePerMin
+    incomePerMin,
+    mergeBusinesses,
+    getBusinessFrom,
+    byQueryFrom
 };

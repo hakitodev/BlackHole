@@ -47,7 +47,8 @@ async function fireEvent(guild, name, vars = {}, fallbackChannel = null) {
     const economy = require("../Database/Economy");
     const type = eventType(name);
     const config = await economy.getGuildEvent(guild.id, name);
-    if (!type || !config?.enabled) {
+    const settings = await economy.getGuildSettings(guild.id);
+    if (settings.paused || !type || !config?.enabled) {
         return;
     }
 

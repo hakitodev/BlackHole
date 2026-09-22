@@ -4,6 +4,9 @@ const { stripPrefix, splitCommand } = require("../Utils/prefix");
 const { createMessageContext } = require("../Utils/messageCommand");
 const { runCommand, resolveCommand } = require("../Utils/runCommand");
 const { canGainXp, xpGain } = require("../Utils/xp");
+const xpBuffer = require("../Utils/xpBuffer");
+const { walletScope, forGuild } = require("../Utils/scope");
+const { isOwner } = require("../Utils/staff");
 const { parseWords, hasInvite, findBannedWord, isPrivileged } = require("../Utils/automod");
 const { fireEvent } = require("../Utils/events");
 const { customPayload } = require("../Utils/customEmbed");
@@ -59,24 +62,21 @@ module.exports = {
 
         if (message.guild) {
             settings = await economy.getGuildSettings(message.guild.id);
+            if (settings.paused && !isOwner({ client, user: message.author })) {
+                return;
+            }
             if (await handleAutomod(message, settings)) {
                 return;
             }
 
             if (settings.xpOn !== false && canGainXp(message.guild.id, message.author.id)) {
-                const progress = await economy.addXp(
+                xpBuffer.add(
                     message.author.id,
                     xpGain(),
-                    settings.levelMoney
+                    settings.levelMoney,
+                    walletScope(settings, message.guild.id),
+                    { guildId: message.guild.id, channelId: message.channel.id }
                 );
-                if (progress?.leveled) {
-                    await fireEvent(message.guild, "levelUp", {
-                        user: message.author,
-                        level: progress.level,
-                        money: progress.money,
-                        xp: progress.xp
-                    }, message.channel);
-                }
             }
 
             prefix = settings.prefixText || PREFIX;
@@ -117,9 +117,16 @@ module.exports = {
             return;
         }
 
+        const { scope } = await forGuild(message.guild.id);
+        const user = await economy.getUser(message.author.id, scope);
+        const owned = await economy.listBusinesses(message.author.id, scope);
         const payload = customPayload(custom, {
             user: message.author,
-            guild: message.guild
+            guild: message.guild,
+            balance: user.balance,
+            level: user.level,
+            xp: user.xp,
+            businessCount: owned.length
         });
         if (!payload.content && !payload.embeds) {
             return;

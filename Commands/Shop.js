@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { buildShopMessage } = require("../Utils/shopView");
+const { forInteraction } = require("../Utils/scope");
 const { error } = require("../Utils/reply");
 
 module.exports = {
@@ -17,6 +18,10 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        const { settings } = await forInteraction(interaction);
+        if (settings.shopGlobal === false && settings.shopGuild === false) {
+            return error(interaction, "Магазин выключен.");
+        }
         const scope = interaction.options.getString("scope") ?? "global";
         const payload = await buildShopMessage(interaction.guildId, scope);
         if (!payload) {

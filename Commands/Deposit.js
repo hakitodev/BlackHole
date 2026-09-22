@@ -1,6 +1,8 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { PAY_MAX } = require("../Utils/limits");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -16,14 +18,19 @@ module.exports = {
     aliases: ["deposit"],
 
     async execute(interaction) {
-        const user = await economy.getUser(interaction.user.id);
-        const parsed = parseAmount(rawAmount(interaction), { available: user.balance });
+        const { scope } = await forInteraction(interaction);
+        const user = await economy.getUser(interaction.user.id, scope);
+        const parsed = parseAmount(rawAmount(interaction), {
+            min: 1,
+            max: PAY_MAX,
+            available: user.balance
+        });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed));
+            return error(interaction, amountMessage(parsed, { min: 1 }));
         }
 
-        const result = await economy.deposit(interaction.user.id, parsed.amount);
+        const result = await economy.deposit(interaction.user.id, parsed.amount, scope);
 
         if (!result.ok) {
             return error(interaction, "Недостаточно наличных.");

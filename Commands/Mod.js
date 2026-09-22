@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { isOwner, requireOwner, isStaff, getRank, RANK, rankLabel, isSenior } = require("../Utils/staff");
+const { isOwner, requireOwner, RANK, rankLabel, isSenior, guildAccess } = require("../Utils/staff");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -52,27 +52,43 @@ module.exports = {
         }
 
         if (sub === "list") {
-            if (!(await isStaff(interaction))) {
+            const access = await guildAccess(interaction.user.id, interaction.guild, interaction.client);
+            if (access.rank < RANK.mod) {
                 return error(interaction, "Нужно быть владельцем или модератором.");
             }
 
-            const rows = await economy.listStaff();
-            if (!rows.length) {
+            const global = access.global ? await economy.listStaff() : [];
+            const local = interaction.guild
+                ? await economy.listGuildStaff(interaction.guild.id)
+                : [];
+            if (!global.length && !local.length) {
                 return error(interaction, "Модераторов нет.");
+            }
+
+            const lines = [];
+            if (global.length) {
+                lines.push("**Всемирные**");
+                for (const [index, row] of global.entries()) {
+                    lines.push(`**${index + 1}.** <@${row.user_id}> — ${rankLabel(Number(row.rank) || 1)}`);
+                }
+            }
+            if (local.length) {
+                lines.push("**Сервер**");
+                for (const [index, row] of local.entries()) {
+                    lines.push(`**${index + 1}.** <@${row.user_id}> — серверный модер`);
+                }
             }
 
             return reply(interaction, {
                 title: "Модераторы",
-                description: rows.map((row, index) =>
-                    `**${index + 1}.** <@${row.user_id}> — ${rankLabel(Number(row.rank) || 1)}`
-                ).join("\n"),
+                description: lines.join("\n"),
                 ephemeral: true
             });
         }
 
-        const actorRank = await getRank(interaction);
-        if (actorRank < RANK.senior) {
-            return error(interaction, "Только высший модератор или владелец.");
+        const access = await guildAccess(interaction.user.id, interaction.guild, interaction.client);
+        if (!access.global && !access.guildOwner) {
+            return error(interaction, "Назначать модеров может владелец сервера или высший модер бота.");
         }
 
         const target = interaction.options.getUser("user");
@@ -94,6 +110,28 @@ module.exports = {
                 ? RANK.senior
                 : RANK.mod;
 
+            if (!access.global) {
+                if (!interaction.guild) {
+                    return error(interaction, "Локальных модеров только на сервере.");
+                }
+                if (wanted >= RANK.senior) {
+                    return error(interaction, "Серверный модер не выдаёт всемирный ранг.");
+                }
+                const result = await economy.addGuildStaff(
+                    interaction.guild.id,
+                    target.id,
+                    interaction.user.id,
+                    RANK.mod
+                );
+                return reply(interaction, {
+                    color: COLOR.green,
+                    description: result.created
+                        ? `${target} теперь серверный модер.`
+                        : `${target} уже серверный модер.`,
+                    ephemeral: true
+                });
+            }
+
             if (wanted >= RANK.senior && !(await requireOwner(interaction))) {
                 return;
             }
@@ -102,9 +140,17 @@ module.exports = {
 
             return reply(interaction, {
                 color: COLOR.green,
-                description: result.created
-                    ? `${target} теперь ${rankLabel(result.rank)}.`
-                    : `${target} теперь ${rankLabel(result.rank)}.`,
+                description: `${target} теперь ${rankLabel(result.rank)}.`,
+                ephemeral: true
+            });
+        }
+
+        if (!access.global) {
+            const removed = await economy.removeGuildStaff(interaction.guild.id, target.id);
+            return reply(interaction, {
+                description: removed
+                    ? `${target} больше не серверный модер.`
+                    : `${target} не был модератором.`,
                 ephemeral: true
             });
         }

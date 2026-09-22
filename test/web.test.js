@@ -25,7 +25,8 @@ function mockRes() {
             this.headersSent = true;
         },
         end(body = "") {
-            this.body = String(body);
+            this.raw = body;
+            this.body = Buffer.isBuffer(body) ? body.toString("utf8") : String(body);
         }
     };
 }
@@ -123,6 +124,21 @@ test("GET /health", async () => {
     await handleRequest(mockReq({ url: "/health" }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).ok, true);
+    assert.equal(res.headers["Content-Encoding"], undefined);
+});
+
+test("gzip html при Accept-Encoding", async () => {
+    const zlib = require("zlib");
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: "/",
+        headers: { "accept-encoding": "gzip" }
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers["Content-Encoding"], "gzip");
+    const raw = Buffer.isBuffer(res.raw) ? res.raw : Buffer.from(res.body);
+    const text = zlib.gunzipSync(raw).toString("utf8");
+    assert.match(text, /Панель бота/);
 });
 
 test("GET / отдаёт лендинг", async () => {
@@ -188,6 +204,8 @@ test("GET /servers/:id/general форма и экранирование имен
     assert.match(res.body, /Ивенты/);
     assert.match(res.body, /Выйти/);
     assert.match(res.body, /XP за сообщения/);
+    assert.match(res.body, /Кошельки/);
+    assert.match(res.body, /Локальные работы/);
 });
 
 test("GET /servers/:id/join каналы без войса", async () => {
@@ -409,6 +427,7 @@ test("сессия живёт после очистки памяти — как 
 test("POST без прав в кэше бота — 403", async () => {
     const guildId = "555666777888999000";
     const cookie = await sessionCookie({
+        user: { id: "77", username: "weak" },
         guilds: [{ id: guildId, name: "Weak", owner: false, permissions: "32" }]
     });
     const client = fakeClient(guildId);

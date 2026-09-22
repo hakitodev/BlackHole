@@ -71,6 +71,12 @@ const RANGES = {
         { key: "crimeMax", label: "Макс" },
         { key: "crimeFineMin", label: "Штраф мин" },
         { key: "crimeFineMax", label: "Штраф макс" }
+    ],
+    flip: [
+        { key: "flipMax", label: "Макс ставка" }
+    ],
+    rob: [
+        { key: "robMax", label: "Макс кража" }
     ]
 };
 

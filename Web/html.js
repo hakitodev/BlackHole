@@ -2,14 +2,16 @@ const { escapeHtml } = require("./access");
 const { inviteUrl } = require("./oauth");
 const { EVENT_TYPES } = require("../Utils/events");
 const { COMMANDS, RANGES } = require("../Utils/commands");
-const { TAGS } = require("../Utils/placeholders");
+const { tagsFor } = require("../Utils/placeholders");
 const { toHex } = require("../Utils/color");
 
 const GUILD_TABS = [
     { id: "general", title: "Общие" },
     { id: "autorole", title: "Автороль" },
     { id: "automod", title: "Автомод" },
-    { id: "shop", title: "Магаз сервера" }
+    { id: "shop", title: "Магаз сервера" },
+    { id: "jobs", title: "Работы" },
+    { id: "biz", title: "Бизнесы" }
 ];
 
 const MODULES = [
@@ -65,7 +67,7 @@ function sideNav({
     if (guild) {
         bits.push(accordion("Сервер", GUILD_TABS.map(item =>
             navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
-        ).join(""), ["general", "autorole", "automod", "shop"].includes(module)));
+        ).join(""), ["general", "autorole", "automod", "shop", "jobs", "biz"].includes(module)));
 
         bits.push(accordion("Команды", COMMANDS.map(item =>
             navLink(
@@ -225,10 +227,14 @@ function channelOptions(channels, selected) {
         .join("");
 }
 
-function tagBar() {
+function tagBar(kind, eventType) {
+    const tags = tagsFor(kind, eventType);
+    if (!tags.length) {
+        return "";
+    }
     return `
       <div class="tags">
-        ${TAGS.map(item =>
+        ${tags.map(item =>
             `<button type="button" class="tag-chip" data-tag="${escapeHtml(item.tag)}">
                <code>${escapeHtml(item.tag)}</code>
                <span>${escapeHtml(item.hint)}</span>
@@ -259,7 +265,7 @@ function eventForm(type, guild, event, channels, bot) {
         <label><span>Канал</span>
           <select name="channel">${channelOptions(channels, event.channel)}</select>
         </label>
-        ${tagBar()}
+        ${tagBar("event", type)}
         <label><span>Текст</span>
           <textarea name="message">${escapeHtml(event.message || "")}</textarea>
         </label>
@@ -272,7 +278,7 @@ function shopTable(items, action, empty) {
     const rows = (items || []).map(item => `
       <tr>
         <td>${escapeHtml(item.emoji)} <code>${escapeHtml(item.id)}</code></td>
-        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.name)}${item.kind === "role" ? " · роль" : ""}</td>
         <td>${escapeHtml(String(item.price))}</td>
         <td>${escapeHtml(item.description)}</td>
         <td>
@@ -309,6 +315,15 @@ function shopEditor(action) {
         <label><span>Цена</span>
           <input type="number" name="price" min="0" value="100">
         </label>
+        <label><span>Тип</span>
+          <select name="kind">
+            <option value="item">Предмет</option>
+            <option value="role">Цветная роль</option>
+          </select>
+        </label>
+        <label><span>HEX роли</span>
+          <input type="text" name="hex" placeholder="#ff0055">
+        </label>
         <label><span>Описание</span>
           <textarea name="description"></textarea>
         </label>
@@ -329,7 +344,7 @@ function commandEditor(guild, command = {}, bot) {
         <label><span>Имя</span>
           <input type="text" name="name" value="${escapeHtml(name)}" ${name ? "readonly" : ""} placeholder="hi" required>
         </label>
-        ${tagBar()}
+        ${tagBar("custom")}
         <label><span>Текст над эмбедом</span>
           <textarea name="content">${escapeHtml(command.content || "")}</textarea>
         </label>
@@ -379,6 +394,75 @@ function commandEditor(guild, command = {}, bot) {
         ${livePreview(bot)}
         <button class="btn" type="submit">${name ? "Сохранить" : "Создать"}</button>
       </form>`;
+}
+
+function catalogTable(items, action, kind) {
+    const extra = kind === "job" ? "Ур. / ×" : "Цена / доход";
+    const rows = (items || []).map(item => `
+      <tr>
+        <td><code>${escapeHtml(item.id)}</code></td>
+        <td>${escapeHtml(item.emoji || "")} ${escapeHtml(item.name)}</td>
+        <td>${kind === "job"
+            ? `${escapeHtml(String(item.minLevel || 1))} / ×${escapeHtml(String(item.mult || 1))}`
+            : `${escapeHtml(String(item.price || 0))} / ${escapeHtml(String(item.income || 0))}`}</td>
+        <td>
+          <form method="post" action="${action}">
+            <input type="hidden" name="op" value="delete">
+            <input type="hidden" name="id" value="${escapeHtml(item.id)}">
+            <button class="btn ghost" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>`).join("");
+    return `
+      <table class="table">
+        <thead><tr><th>ID</th><th>Название</th><th>${extra}</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="muted">Пока пусто.</td></tr>`}</tbody>
+      </table>`;
+}
+
+function catalogEditor(kind, action) {
+    if (kind === "job") {
+        return `
+          <form class="stack" method="post" action="${action}">
+            <input type="hidden" name="op" value="save">
+            <div class="split">
+              <label><span>ID латиницей</span><input type="text" name="id" placeholder="baker" required></label>
+              <label><span>Название</span><input type="text" name="name" placeholder="Пекарь" required></label>
+            </div>
+            <div class="split">
+              <label><span>Мин. уровень</span><input type="number" name="minLevel" min="1" value="1"></label>
+              <label><span>Множитель зарплаты</span><input type="number" name="mult" min="0.1" step="0.1" value="1.2"></label>
+            </div>
+            <button class="btn" type="submit">Сохранить работу</button>
+          </form>`;
+    }
+    return `
+      <form class="stack" method="post" action="${action}">
+        <input type="hidden" name="op" value="save">
+        <div class="split">
+          <label><span>ID латиницей</span><input type="text" name="id" placeholder="garage" required></label>
+          <label><span>Эмодзи</span><input type="text" name="emoji" placeholder="🛠️"></label>
+        </div>
+        <label><span>Название</span><input type="text" name="name" placeholder="Гараж" required></label>
+        <div class="split">
+          <label><span>Цена</span><input type="number" name="price" min="0" value="10000"></label>
+          <label><span>Доход / мин</span><input type="number" name="income" min="0" value="20"></label>
+        </div>
+        <div class="split">
+          <label><span>Кап</span><input type="number" name="cap" min="1" value="4000"></label>
+          <label><span>Макс ур.</span><input type="number" name="maxLevel" min="1" value="10"></label>
+        </div>
+        <button class="btn" type="submit">Сохранить бизнес</button>
+      </form>`;
+}
+
+function switchField(name, checked, label) {
+    return `
+      <input type="hidden" name="${escapeHtml(name)}" value="0">
+      <label class="switch">
+        <input type="checkbox" name="${escapeHtml(name)}" value="1" ${checked ? "checked" : ""}>
+        ${escapeHtml(label)}
+      </label>`;
 }
 
 function eventModule(id) {
@@ -442,25 +526,52 @@ function moduleForm(module, guild, settings, extras) {
           </div>`;
     }
 
+    if (module === "jobs") {
+        return `
+          <div class="stack card">
+            <h2>Локальные работы</h2>
+            ${catalogTable(extras.jobs || [], action, "job")}
+            ${catalogEditor("job", action)}
+          </div>`;
+    }
+
+    if (module === "biz") {
+        return `
+          <div class="stack card">
+            <h2>Локальные бизнесы</h2>
+            ${catalogTable(extras.businesses || [], action, "biz")}
+            ${catalogEditor("biz", action)}
+          </div>`;
+    }
+
     return `
       <form class="stack card" method="post" action="${action}">
         <h2>Общие</h2>
-        <input type="hidden" name="prefix" value="0">
-        <label class="switch">
-          <input type="checkbox" name="prefix" value="1" ${settings.prefix ? "checked" : ""}>
-          Префикс-команды
-        </label>
+        ${switchField("prefix", settings.prefix, "Префикс-команды")}
         <label><span>Префикс</span>
           <input type="text" name="prefixText" maxlength="8" value="${escapeHtml(settings.prefixText)}">
         </label>
-        <input type="hidden" name="xpOn" value="0">
-        <label class="switch">
-          <input type="checkbox" name="xpOn" value="1" ${settings.xpOn ? "checked" : ""}>
-          XP за сообщения
-        </label>
+        ${switchField("xpOn", settings.xpOn, "XP за сообщения")}
         <label><span>Монет за новый уровень</span>
           <input type="number" name="levelMoney" min="0" value="${escapeHtml(String(settings.levelMoney ?? 250))}">
         </label>
+        <h3>Экономика</h3>
+        <label><span>Кошельки</span>
+          <select name="walletScope">
+            <option value="global" ${settings.walletScope !== "guild" ? "selected" : ""}>Всемирная</option>
+            <option value="guild" ${settings.walletScope === "guild" ? "selected" : ""}>Гильдийная</option>
+          </select>
+        </label>
+        ${switchField("economyOn", settings.economyOn !== false, "Команды экономики")}
+        ${switchField("earnOn", settings.earnOn !== false, "Получение денег")}
+        ${switchField("jobsGlobal", settings.jobsGlobal !== false, "Всемирные работы")}
+        ${switchField("jobsGuild", settings.jobsGuild, "Локальные работы")}
+        ${switchField("bizGlobal", settings.bizGlobal !== false, "Всемирные бизнесы")}
+        ${switchField("bizGuild", settings.bizGuild, "Локальные бизнесы")}
+        ${switchField("shopGlobal", settings.shopGlobal !== false, "Всемирный магазин")}
+        ${switchField("shopGuild", settings.shopGuild !== false, "Магазин сервера")}
+        ${switchField("penaltiesOn", settings.penaltiesOn !== false, "Штрафы за простой")}
+        ${extras.owner ? switchField("paused", settings.paused, "Пауза бота на этом сервере") : ""}
         <button class="btn" type="submit">Сохранить</button>
       </form>`;
 }
@@ -513,6 +624,9 @@ function settingsPage(opts) {
         custom = [],
         event,
         shop = [],
+        jobs = [],
+        businesses = [],
+        owner = false,
         editCommand = null,
         module = "general",
         cmdName = "",
@@ -559,7 +673,7 @@ function settingsPage(opts) {
               </form>`;
         }
     } else {
-        inner = moduleForm(module, guild, data, { channels, roles, shop, event, bot });
+        inner = moduleForm(module, guild, data, { channels, roles, shop, jobs, businesses, event, bot, owner });
     }
 
     return layout({

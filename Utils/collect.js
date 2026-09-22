@@ -40,20 +40,20 @@ function workRange(settings, jobId) {
     };
 }
 
-async function runDaily(userId, settings) {
-    return economy.claimDaily(userId, dailyReward(settings), DAILY_COOLDOWN);
+async function runDaily(userId, settings, scope) {
+    return economy.claimDaily(userId, dailyReward(settings), DAILY_COOLDOWN, 25, scope);
 }
 
-async function runWork(userId, settings, user) {
+async function runWork(userId, settings, user, scope) {
     const shift = pick(JOBS);
     const range = workRange(settings, user?.job);
     const payout = integer(range.min, range.max);
-    const work = await economy.claimWork(userId, payout, WORK_COOLDOWN);
+    const work = await economy.claimWork(userId, payout, WORK_COOLDOWN, 15, scope);
     const job = getJob(user?.job);
     return { ...work, text: shift.text, job: job.name };
 }
 
-async function runCrime(userId, settings, random = Math.random) {
+async function runCrime(userId, settings, random = Math.random, scope) {
     const success = random() < 0.55;
     const payout = integer(settings?.crimeMin ?? 180, settings?.crimeMax ?? 480);
     const fine = integer(settings?.crimeFineMin ?? 80, settings?.crimeFineMax ?? 220);
@@ -63,7 +63,9 @@ async function runCrime(userId, settings, random = Math.random) {
         CRIME_COOLDOWN,
         success,
         payout,
-        fine
+        fine,
+        20,
+        scope
     );
     return { ...crime, text: action };
 }
@@ -71,21 +73,23 @@ async function runCrime(userId, settings, random = Math.random) {
 async function runCollect(userId, kind, options = {}) {
     const settings = options.settings || {};
     const random = options.random || Math.random;
-    const user = await economy.getUser(userId);
+    const scope = options.scope || "global";
+    await economy.applyIdlePenalties(userId, scope, settings);
+    const user = await economy.getUser(userId, scope);
     let part;
 
     if (kind === "daily") {
-        const daily = await runDaily(userId, settings);
+        const daily = await runDaily(userId, settings, scope);
         part = daily.ok
             ? { id: "daily", ok: true, amount: daily.amount, level: daily.level, leveled: daily.leveled }
             : { id: "daily", ok: false, nextAt: daily.nextAt };
     } else if (kind === "work") {
-        const work = await runWork(userId, settings, user);
+        const work = await runWork(userId, settings, user, scope);
         part = work.ok
             ? { id: "work", ok: true, amount: work.amount, text: work.text, job: work.job, level: work.level, leveled: work.leveled }
             : { id: "work", ok: false, nextAt: work.nextAt };
     } else if (kind === "crime") {
-        const crime = await runCrime(userId, settings, random);
+        const crime = await runCrime(userId, settings, random, scope);
         if (!crime.ok) {
             part = { id: "crime", ok: false, nextAt: crime.nextAt };
         } else if (crime.success) {
@@ -112,7 +116,7 @@ async function runCollect(userId, kind, options = {}) {
         return { parts: [], claimed: false, level: null, balance: user.balance };
     }
 
-    const after = await economy.getUser(userId);
+    const after = await economy.getUser(userId, scope);
     return {
         parts: [part],
         claimed: Boolean(part.ok),

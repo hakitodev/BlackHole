@@ -1,6 +1,6 @@
 require("./Config");
 
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, Options } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const economy = require("./Database/Economy");
@@ -8,6 +8,9 @@ const { payload } = require("./Utils/reply");
 const { runCommand, resolveCommand } = require("./Utils/runCommand");
 const { customPayload } = require("./Utils/customEmbed");
 const { remember } = require("./Utils/profile");
+const xpBuffer = require("./Utils/xpBuffer");
+const { forGuild } = require("./Utils/scope");
+const { isOwner } = require("./Utils/staff");
 
 const client = new Client({
     intents: [
@@ -21,7 +24,15 @@ const client = new Client({
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel, Partials.Message]
+    partials: [Partials.Channel, Partials.Message],
+    makeCache: Options.cacheWithLimits({
+        ...Options.DefaultMakeCacheSettings,
+        PresenceManager: 0,
+        ReactionManager: 0,
+        ThreadManager: 0,
+        GuildScheduledEventManager: 0,
+        MessageManager: 5
+    })
 });
 
 client.commands = new Map();
@@ -104,11 +115,27 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (interaction.guild) {
+            const settings = await economy.getGuildSettings(interaction.guild.id);
+            if (settings.paused && !isOwner(interaction)) {
+                await interaction.reply(payload({
+                    description: "Сервер помечен как отключён.",
+                    color: 0xED4245,
+                    ephemeral: true
+                })).catch(() => {});
+                return;
+            }
+            const { scope } = await forGuild(interaction.guild.id);
+            const user = await economy.getUser(interaction.user.id, scope);
+            const owned = await economy.listBusinesses(interaction.user.id, scope);
             const custom = await economy.getCustomCommand(interaction.guild.id, interaction.commandName);
             if (custom) {
                 const body = customPayload(custom, {
                     user: interaction.user,
-                    guild: interaction.guild
+                    guild: interaction.guild,
+                    balance: user.balance,
+                    level: user.level,
+                    xp: user.xp,
+                    businessCount: owned.length
                 });
                 if (body.content || body.embeds) {
                     await interaction.reply(body).catch(() => {});
@@ -151,6 +178,8 @@ client.on("interactionCreate", async interaction => {
 
 async function shutdown(signal) {
     console.log(`Остановка (${signal})`);
+    xpBuffer.stop();
+    await xpBuffer.flush().catch(() => {});
     client.destroy();
     await economy.closeDatabase().catch(() => {});
     process.exit(0);
@@ -161,6 +190,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function startBot() {
     await economy.initDatabase();
+    xpBuffer.start(client);
 
     if (!process.env.DISCORD_TOKEN) {
         console.warn("DISCORD_TOKEN не найден — бот не залогинен, сайт всё равно работает");

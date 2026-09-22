@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
-const economy = require("../Database/Economy");
 const { runCollect, formatCollect } = require("../Utils/collect");
 const { isDisabled } = require("../Utils/commands");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 const KINDS = new Set(["daily", "work", "crime"]);
@@ -21,15 +21,13 @@ module.exports = {
             return error(interaction, "Укажи `daily`, `work` или `crime`.");
         }
 
-        const settings = interaction.guild
-            ? await economy.getGuildSettings(interaction.guild.id)
-            : {};
+        const { scope, settings } = await forInteraction(interaction);
 
         if (isDisabled(settings, kind)) {
             return error(interaction, `\`${kind}\` выключен на этом сервере.`);
         }
 
-        const result = await runCollect(interaction.user.id, kind, { settings });
+        const result = await runCollect(interaction.user.id, kind, { settings, scope });
         return reply(interaction, {
             title: "Сбор",
             color: result.claimed ? COLOR.gold : COLOR.blurple,

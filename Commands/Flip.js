@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { remaining, hit, formatSeconds } = require("../Utils/cooldown");
 const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { FLIP_MAX_BET, clampGuildCap } = require("../Utils/limits");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -17,14 +19,17 @@ module.exports = {
     aliases: ["coinflip", "cf"],
 
     async execute(interaction) {
-        const user = await economy.getUser(interaction.user.id);
+        const { scope, settings } = await forInteraction(interaction);
+        const user = await economy.getUser(interaction.user.id, scope);
+        const max = clampGuildCap(settings.flipMax, FLIP_MAX_BET);
         const parsed = parseAmount(rawAmount(interaction), {
             min: 1,
+            max,
             available: user.balance
         });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { min: 1 }));
+            return error(interaction, amountMessage(parsed, { min: 1, max }));
         }
 
         const key = `flip:${interaction.user.id}`;
@@ -35,7 +40,7 @@ module.exports = {
         }
 
         const win = Math.random() < 0.5;
-        const result = await economy.flipBet(interaction.user.id, parsed.amount, win);
+        const result = await economy.flipBet(interaction.user.id, parsed.amount, win, scope);
 
         if (!result.ok) {
             return error(interaction, "Недостаточно наличных.");

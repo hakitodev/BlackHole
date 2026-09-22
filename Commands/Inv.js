@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { get, format } = require("../Utils/shop");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -15,7 +16,8 @@ module.exports = {
 
     async execute(interaction) {
         const member = interaction.options.getUser("user") ?? interaction.user;
-        const rows = await economy.getInventory(member.id);
+        const { scope } = await forInteraction(interaction);
+        const rows = await economy.getInventory(member.id, scope);
 
         if (!rows.length) {
             return error(

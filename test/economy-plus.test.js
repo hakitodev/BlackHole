@@ -86,6 +86,68 @@ test("бизнес: купить, кап, collect", async () => {
     assert.ok(peek.unclaimed <= def.cap);
 });
 
+test("бизнес: доход считается по timestamp", async () => {
+    const id = uid();
+    const def = getBusiness("stall");
+    await economy.addBalance(id, def.price);
+    await economy.buyBusiness(id, def.id, def);
+    const later = Date.now() + 60 * 60 * 1000;
+    const peek = await economy.peekBusiness(id, def.id, def, later);
+    const expected = Math.floor((def.income / 60) * 3600);
+    assert.equal(peek.unclaimed, Math.min(def.cap, expected));
+    assert.equal(peek.stalled, false);
+});
+
+test("бизнес: простой после 24ч, без cron", async () => {
+    const id = uid();
+    const def = getBusiness("stall");
+    await economy.addBalance(id, def.price + 500);
+    await economy.buyBusiness(id, def.id, def);
+    const later = Date.now() + 25 * 60 * 60 * 1000;
+    const peek = await economy.peekBusiness(id, def.id, def, later, { penaltiesOn: true });
+    assert.equal(peek.stalled, true);
+    const collect = await economy.collectBusiness(id, def.id, def, { now: later, penaltiesOn: true });
+    assert.equal(collect.ok, false);
+    assert.equal(collect.reason, "stalled");
+    const restart = await economy.restartBusiness(id, def.id, def);
+    assert.equal(restart.ok, true);
+});
+
+test("гильдийный кошелёк не трогает глобальный", async () => {
+    const id = uid();
+    await economy.addBalance(id, 500);
+    await economy.addBalance(id, 80, "guild-1");
+    assert.equal((await economy.getUser(id)).balance, 500);
+    assert.equal((await economy.getUser(id, "guild-1")).balance, 80);
+    await economy.transfer(id, uid(), 100);
+    assert.equal((await economy.getUser(id, "guild-1")).balance, 80);
+});
+
+test("работа: увольнение за простой 36ч", async () => {
+    const id = uid();
+    await economy.setJob(id, "dev");
+    await economy.setUser(id, { lastWork: Date.now() - 37 * 60 * 60 * 1000 });
+    const result = await economy.applyIdlePenalties(id, "global", { penaltiesOn: true });
+    assert.equal(result.fired, true);
+    assert.equal((await economy.getUser(id)).job, "intern");
+});
+
+test("rob: куш режется системным лимитом", async () => {
+    const robber = uid();
+    const victim = uid();
+    await economy.addBalance(victim, 200000);
+    const result = await economy.attemptRob(
+        robber,
+        victim,
+        0,
+        true,
+        80000,
+        80
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.amount, 15000);
+});
+
 test("ник пишется в базу и ищется", async () => {
     const id = "397351234567890123";
     await economy.touchProfile(id, { username: "Kitoha" });

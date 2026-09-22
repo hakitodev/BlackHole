@@ -1,6 +1,8 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { parseAmount, amountMessage, isAll } = require("../Utils/amount");
+const { BTC_MAX_COINS } = require("../Utils/limits");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -31,7 +33,8 @@ module.exports = {
     async execute(interaction) {
         const sub = interaction.options.getSubcommand(false) || "price";
         const price = await economy.btcPrice();
-        const user = await economy.getUser(interaction.user.id);
+        const { scope } = await forInteraction(interaction);
+        const user = await economy.getUser(interaction.user.id, scope);
 
         if (sub === "price") {
             return reply(interaction, {
@@ -45,12 +48,16 @@ module.exports = {
 
         const raw = interaction.options.getString("amount");
         if (sub === "buy") {
-            const max = Math.floor(user.balance / price);
-            const parsed = parseAmount(isAll(raw) ? "all" : raw, { min: 1, available: max });
+            const max = Math.min(BTC_MAX_COINS, Math.floor(user.balance / price));
+            const parsed = parseAmount(isAll(raw) ? "all" : raw, {
+                min: 1,
+                max: BTC_MAX_COINS,
+                available: max
+            });
             if (!parsed.ok) {
-                return error(interaction, amountMessage(parsed, { min: 1 }));
+                return error(interaction, amountMessage(parsed, { min: 1, max: BTC_MAX_COINS }));
             }
-            const result = await economy.buyBtc(interaction.user.id, parsed.amount);
+            const result = await economy.buyBtc(interaction.user.id, parsed.amount, scope);
             if (!result.ok) {
                 return error(interaction, `Нужно **${price * parsed.amount}**.`);
             }
@@ -60,11 +67,15 @@ module.exports = {
             });
         }
 
-        const parsed = parseAmount(isAll(raw) ? "all" : raw, { min: 1, available: user.btc });
+        const parsed = parseAmount(isAll(raw) ? "all" : raw, {
+            min: 1,
+            max: BTC_MAX_COINS,
+            available: user.btc
+        });
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { min: 1 }));
+            return error(interaction, amountMessage(parsed, { min: 1, max: BTC_MAX_COINS }));
         }
-        const result = await economy.sellBtc(interaction.user.id, parsed.amount);
+        const result = await economy.sellBtc(interaction.user.id, parsed.amount, scope);
         if (!result.ok) {
             return error(interaction, "Не хватает BTC.");
         }

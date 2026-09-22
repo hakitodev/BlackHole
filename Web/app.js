@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
 const { CLIENT_ID, CLIENT_SECRET } = require("../Config");
 const economy = require("../Database/Economy");
 const { canManageGuild, parseForm, escapeHtml, assertGuildManage } = require("./access");
@@ -23,7 +24,7 @@ const {
     errorPage
 } = require("./html");
 const { asList } = require("../Utils/ids");
-const { isBotAdmin } = require("../Utils/staff");
+const { isBotAdmin, isOwner, guildAccess } = require("../Utils/staff");
 const { eventType } = require("../Utils/events");
 const { COMMANDS, canonicalName, RANGES } = require("../Utils/commands");
 const { enrichUsers, lookupDiscord } = require("../Utils/profile");
@@ -35,13 +36,31 @@ const oauthStates = new Map();
 const STATE_TTL = 10 * 60 * 1000;
 const CMD_IDS = new Set(COMMANDS.map(item => item.id));
 
+function wantsGzip(req) {
+    return String(req?.headers?.["accept-encoding"] || "").toLowerCase().includes("gzip");
+}
+
+function sendRaw(res, status, body, headers = {}) {
+    const raw = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
+    const out = { ...headers };
+    if (res.req && wantsGzip(res.req) && raw.length > 256 && !out["Content-Encoding"]) {
+        const compressed = zlib.gzipSync(raw);
+        out["Content-Encoding"] = "gzip";
+        out.Vary = out.Vary ? `${out.Vary}, Accept-Encoding` : "Accept-Encoding";
+        res.writeHead(status, out);
+        res.end(compressed);
+        return;
+    }
+    res.writeHead(status, out);
+    res.end(raw);
+}
+
 function send(res, status, body, headers = {}) {
-    res.writeHead(status, {
+    sendRaw(res, status, body, {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
         ...headers
     });
-    res.end(body);
 }
 
 function rememberOauthState(state) {
@@ -85,6 +104,64 @@ function managedGuilds(session) {
 
 function findManaged(session, guildId) {
     return managedGuilds(session).find(guild => guild.id === guildId) || null;
+}
+
+function mergeGuildCards(list) {
+    const map = new Map();
+    for (const guild of list) {
+        map.set(guild.id, guild);
+    }
+    return [...map.values()];
+}
+
+async function panelGuilds(session, client, user, admin) {
+    const listed = withBotFlag(client, managedGuilds(session));
+    const extra = [];
+    if (user) {
+        const rows = await economy.listGuildStaffForUser(user.id);
+        for (const row of rows) {
+            const guild = client.guilds?.cache?.get(row.guild_id);
+            if (guild) {
+                extra.push({
+                    id: guild.id,
+                    name: guild.name,
+                    icon: guild.icon,
+                    owner: false,
+                    permissions: "0",
+                    bot: true
+                });
+            }
+        }
+    }
+    if (admin && client.guilds?.cache) {
+        for (const guild of client.guilds.cache.values()) {
+            extra.push({
+                id: guild.id,
+                name: guild.name,
+                icon: guild.icon,
+                owner: false,
+                permissions: "8",
+                bot: true
+            });
+        }
+    }
+    return mergeGuildCards([...listed, ...extra]);
+}
+
+async function canOpenGuild(session, guildId, client, user, admin) {
+    if (findManaged(session, guildId)) {
+        return true;
+    }
+    if (admin && client.guilds?.cache?.has(guildId)) {
+        return true;
+    }
+    if (user) {
+        const rank = await economy.getGuildStaffRank(guildId, user.id);
+        if (rank >= 1) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function withBotFlag(client, guilds) {
@@ -138,6 +215,13 @@ function assignableRoles(guild) {
         .map(role => ({ id: role.id, name: role.name }));
 }
 
+function optionalChecked(form, key) {
+    if (form[key] === undefined) {
+        return undefined;
+    }
+    return checked(form, key);
+}
+
 function patchFromForm(module, form) {
     if (module === "autorole") {
         return { autoroles: asList(form.autorole) };
@@ -149,10 +233,23 @@ function patchFromForm(module, form) {
         };
     }
     return {
-        prefix: checked(form, "prefix"),
+        prefix: optionalChecked(form, "prefix"),
         prefixText: form.prefixText,
-        xpOn: checked(form, "xpOn"),
-        levelMoney: form.levelMoney
+        xpOn: optionalChecked(form, "xpOn"),
+        levelMoney: form.levelMoney,
+        walletScope: form.walletScope === undefined
+            ? undefined
+            : (form.walletScope === "guild" ? "guild" : "global"),
+        jobsGlobal: optionalChecked(form, "jobsGlobal"),
+        jobsGuild: optionalChecked(form, "jobsGuild"),
+        bizGlobal: optionalChecked(form, "bizGlobal"),
+        bizGuild: optionalChecked(form, "bizGuild"),
+        shopGlobal: optionalChecked(form, "shopGlobal"),
+        shopGuild: optionalChecked(form, "shopGuild"),
+        earnOn: optionalChecked(form, "earnOn"),
+        economyOn: optionalChecked(form, "economyOn"),
+        penaltiesOn: optionalChecked(form, "penaltiesOn"),
+        paused: optionalChecked(form, "paused")
     };
 }
 
@@ -289,6 +386,9 @@ async function handleAdminUsers(req, res, url, user, admin, bot, cookies, client
 }
 
 async function handleRequest(req, res, client) {
+    if (!res.req) {
+        res.req = req;
+    }
     const url = new URL(req.url, "http://localhost");
     let session = await sessionFromRequest(req);
     if (session) {
@@ -306,14 +406,12 @@ async function handleRequest(req, res, client) {
     }
 
     if (url.pathname === "/style.css") {
-        res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" });
-        res.end(STYLE);
+        sendRaw(res, 200, STYLE, { "Content-Type": "text/css; charset=utf-8" });
         return;
     }
 
     if (url.pathname === "/editor.js") {
-        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-        res.end(EDITOR);
+        sendRaw(res, 200, EDITOR, { "Content-Type": "text/javascript; charset=utf-8" });
         return;
     }
 
@@ -379,7 +477,7 @@ async function handleRequest(req, res, client) {
             user,
             admin,
             bot,
-            guilds: withBotFlag(client, managedGuilds(session))
+            guilds: await panelGuilds(session, client, user, admin)
         }), cookies);
         return;
     }
@@ -439,7 +537,7 @@ async function handleRequest(req, res, client) {
 
         const guildId = serverMatch[1];
         const rest = String(serverMatch[2] || "");
-        const listed = findManaged(session, guildId);
+        const listed = await canOpenGuild(session, guildId, client, user, admin);
         if (!listed) {
             send(res, 403, errorPage({ user, admin, bot, message: "Нет прав на этот сервер." }), cookies);
             return;
@@ -475,7 +573,7 @@ async function handleRequest(req, res, client) {
         }
 
         if (module !== "cmd" && module !== "custom" && !eventType(module)
-            && !["general", "autorole", "automod", "shop"].includes(module)) {
+            && !["general", "autorole", "automod", "shop", "jobs", "biz"].includes(module)) {
             send(res, 404, errorPage({ user, admin, bot, message: "Страница не найдена." }), cookies);
             return;
         }
@@ -483,7 +581,8 @@ async function handleRequest(req, res, client) {
         const custom = await economy.listCustomCommands(guildId);
 
         if (req.method === "POST") {
-            const allowed = await assertGuildManage(guild, user.id);
+            const access = await guildAccess(user.id, guild, client);
+            const allowed = access.global || access.local || await assertGuildManage(guild, user.id);
             if (!allowed) {
                 send(res, 403, errorPage({ user, admin, bot, message: "Нет прав на этот сервер." }), cookies);
                 return;
@@ -535,6 +634,16 @@ async function handleRequest(req, res, client) {
                     redirect(res, `/servers/${guildId}/shop?saved=1`, cookies);
                     return;
                 }
+                if (module === "jobs" || module === "biz") {
+                    const kind = module === "jobs" ? "job" : "biz";
+                    if (form.op === "delete") {
+                        await economy.deleteCatalogItem(guildId, kind, form.id);
+                    } else {
+                        await economy.saveCatalogItem(guildId, kind, form);
+                    }
+                    redirect(res, `/servers/${guildId}/${module}?saved=1`, cookies);
+                    return;
+                }
                 if (eventType(module)) {
                     await economy.saveGuildEvent(guildId, module, {
                         enabled: checked(form, "enabled"),
@@ -544,7 +653,11 @@ async function handleRequest(req, res, client) {
                     redirect(res, `/servers/${guildId}/${module}?saved=1`, cookies);
                     return;
                 }
-                await economy.saveGuildSettings(guildId, patchFromForm(module, form));
+                const patch = patchFromForm(module, form);
+                if (!isOwner({ client, user })) {
+                    delete patch.paused;
+                }
+                await economy.saveGuildSettings(guildId, patch);
                 redirect(res, `/servers/${guildId}/${module}?saved=1`, cookies);
             } catch (error) {
                 console.error(error);
@@ -565,6 +678,9 @@ async function handleRequest(req, res, client) {
             custom,
             event: eventType(module) ? await economy.getGuildEvent(guildId, module) : undefined,
             shop: module === "shop" ? await economy.listShopItems(guildId) : [],
+            jobs: module === "jobs" ? await economy.listCatalog(guildId, "job") : [],
+            businesses: module === "biz" ? await economy.listCatalog(guildId, "biz") : [],
+            owner: isOwner({ client, user }),
             editCommand: module === "custom" && customName
                 ? await economy.getCustomCommand(guildId, customName)
                 : null,

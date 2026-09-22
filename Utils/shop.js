@@ -1,7 +1,7 @@
 const economy = require("../Database/Economy");
 
-async function list(guildId) {
-    return economy.listShop(guildId);
+async function list(guildId, settings) {
+    return economy.listShop(guildId, settings);
 }
 
 async function get(id, guildId) {

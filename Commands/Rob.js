@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { integer } = require("../Utils/random");
 const { formatDuration } = require("../Utils/time");
+const { ROB_MAX_STEAL, clampGuildCap } = require("../Utils/limits");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 const COOLDOWN = 90 * 60 * 1000;
@@ -33,14 +35,19 @@ module.exports = {
             return error(interaction, "Нельзя ограбить себя.");
         }
 
-        const victim = await economy.getUser(target.id);
+        const { scope, settings } = await forInteraction(interaction);
+        const victim = await economy.getUser(target.id, scope);
 
         if (victim.balance < 1) {
             return error(interaction, "Нечего брать. Банк не украсть.");
         }
 
+        const cap = clampGuildCap(settings.robMax, ROB_MAX_STEAL);
         const success = Math.random() < 0.35;
-        const steal = Math.max(1, Math.floor(victim.balance * (integer(15, 35) / 100)));
+        const steal = Math.min(
+            cap,
+            Math.max(1, Math.floor(victim.balance * (integer(15, 35) / 100)))
+        );
         const fine = integer(80, 180);
 
         const result = await economy.attemptRob(
@@ -50,7 +57,9 @@ module.exports = {
             success,
             steal,
             fine,
-            1
+            1,
+            cap,
+            scope
         );
 
         if (!result.ok && result.reason === "cooldown") {

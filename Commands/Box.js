@@ -6,6 +6,7 @@ const {
 } = require("discord.js");
 const economy = require("../Database/Economy");
 const { BOXES, byQuery, roll } = require("../Utils/boxes");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 function boxButtons(owned) {
@@ -20,9 +21,9 @@ function boxButtons(owned) {
     );
 }
 
-async function openOwned(userId, box, random) {
+async function openOwned(userId, box, scope, random) {
     const loot = roll(box, random);
-    return economy.openBox(userId, box.id, loot.amount).then(result => ({ ...result, ...loot, box }));
+    return economy.openBox(userId, box.id, loot.amount, scope).then(result => ({ ...result, ...loot, box }));
 }
 
 module.exports = {
@@ -40,13 +41,14 @@ module.exports = {
     aliases: ["case", "lootbox"],
 
     async execute(interaction) {
+        const { scope } = await forInteraction(interaction);
         const query = interaction.options.getString("item");
-        const inv = await economy.getInventory(interaction.user.id);
+        const inv = await economy.getInventory(interaction.user.id, scope);
         const owned = new Map(inv.map(row => [row.item_id, row.qty]));
         const have = BOXES.filter(box => owned.get(box.id) > 0);
 
         const open = async box => {
-            const result = await openOwned(interaction.user.id, box);
+            const result = await openOwned(interaction.user.id, box, scope);
             if (!result.ok) {
                 return error(interaction, "Нет такого бокса.");
             }
@@ -97,7 +99,7 @@ module.exports = {
                 await i.deferUpdate().catch(() => {});
                 return;
             }
-            const result = await openOwned(interaction.user.id, box);
+            const result = await openOwned(interaction.user.id, box, scope);
             collector.stop("opened");
             const jackpot = result.ok && result.jackpot ? " Джекпот." : "";
             const text = result.ok

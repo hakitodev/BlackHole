@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { remaining, hit, formatSeconds } = require("../Utils/cooldown");
 const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { PAY_MAX } = require("../Utils/limits");
+const { forInteraction } = require("../Utils/scope");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 async function resolveTarget(interaction) {
@@ -62,14 +64,16 @@ module.exports = {
             return error(interaction, "Нельзя перевести себе.");
         }
 
-        const user = await economy.getUser(interaction.user.id);
+        const { scope } = await forInteraction(interaction);
+        const user = await economy.getUser(interaction.user.id, scope);
         const parsed = parseAmount(rawAmount(interaction), {
             min: 1,
+            max: PAY_MAX,
             available: user.balance
         });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { min: 1 }));
+            return error(interaction, amountMessage(parsed, { min: 1, max: PAY_MAX }));
         }
 
         const key = `pay:${interaction.user.id}`;
@@ -84,7 +88,8 @@ module.exports = {
         const result = await economy.transfer(
             interaction.user.id,
             target.id,
-            parsed.amount
+            parsed.amount,
+            scope
         );
 
         if (!result.ok) {
