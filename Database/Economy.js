@@ -2,6 +2,7 @@ const fs = require("fs");
 const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
 const path = require("path");
+const { PREFIX, SERVERS } = require("../Config");
 
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
 const ROOT = path.join(__dirname, "..");
@@ -151,6 +152,7 @@ async function initDatabase(filename) {
     `);
 
     await ensureColumns();
+    await ensureGuildColumns();
     await checkpoint();
 
     if (!filename) {
@@ -175,6 +177,25 @@ async function ensureColumns() {
     for (const [name, definition] of Object.entries(required)) {
         if (!names.has(name)) {
             await db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
+        }
+    }
+}
+
+async function ensureGuildColumns() {
+    const columns = await db.all("PRAGMA table_info(guilds)");
+    const names = new Set(columns.map(column => column.name));
+    const required = {
+        prefix: "INTEGER NOT NULL DEFAULT 1",
+        prefix_text: "TEXT NOT NULL DEFAULT '!'",
+        welcome_on: "INTEGER NOT NULL DEFAULT 0",
+        welcome_channel: "TEXT",
+        welcome_message: "TEXT",
+        leave_message: "TEXT"
+    };
+
+    for (const [name, definition] of Object.entries(required)) {
+        if (!names.has(name)) {
+            await db.exec(`ALTER TABLE guilds ADD COLUMN ${name} ${definition}`);
         }
     }
 }
@@ -651,30 +672,91 @@ async function listStaff() {
     return db.all("SELECT user_id, added_by, added_at FROM staff ORDER BY added_at ASC");
 }
 
+function asGuildSettings(row, id) {
+    return {
+        id,
+        prefix: Number(row?.prefix) !== 0,
+        prefixText: row?.prefix_text || PREFIX,
+        welcomeOn: Number(row?.welcome_on) !== 0,
+        welcomeChannel: row?.welcome_channel || "",
+        welcomeMessage: row?.welcome_message || "",
+        leaveMessage: row?.leave_message || ""
+    };
+}
+
+async function getGuildSettings(guildId) {
+    const id = String(guildId);
+    const inserted = await db.run(
+        "INSERT OR IGNORE INTO guilds(id, prefix_text) VALUES(?, ?)",
+        id,
+        PREFIX
+    );
+
+    let row = await db.get("SELECT * FROM guilds WHERE id = ?", id);
+    const seed = SERVERS[id];
+
+    if (inserted.changes > 0 && seed) {
+        await db.run(
+            `UPDATE guilds
+             SET welcome_on = 1,
+                 welcome_channel = ?,
+                 welcome_message = ?,
+                 leave_message = ?
+             WHERE id = ?`,
+            seed.channelId || "",
+            seed.welcomeMessage || "",
+            seed.leaveMessage || "",
+            id
+        );
+        row = await db.get("SELECT * FROM guilds WHERE id = ?", id);
+    }
+
+    return asGuildSettings(row, id);
+}
+
+async function saveGuildSettings(guildId, settings) {
+    const id = String(guildId);
+    const prefixText = String(settings.prefixText ?? PREFIX).trim().slice(0, 8) || PREFIX;
+    const welcomeChannel = String(settings.welcomeChannel ?? "").replace(/\D/g, "").slice(0, 20);
+    const welcomeMessage = String(settings.welcomeMessage ?? "").slice(0, 1000);
+    const leaveMessage = String(settings.leaveMessage ?? "").slice(0, 1000);
+    const prefix = settings.prefix ? 1 : 0;
+    const welcomeOn = settings.welcomeOn ? 1 : 0;
+
+    await db.run(
+        `INSERT INTO guilds(id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message)
+         VALUES(?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            prefix = excluded.prefix,
+            prefix_text = excluded.prefix_text,
+            welcome_on = excluded.welcome_on,
+            welcome_channel = excluded.welcome_channel,
+            welcome_message = excluded.welcome_message,
+            leave_message = excluded.leave_message`,
+        id,
+        prefix,
+        prefixText,
+        welcomeOn,
+        welcomeChannel,
+        welcomeMessage,
+        leaveMessage
+    );
+
+    return getGuildSettings(id);
+}
+
 async function isPrefixEnabled(guildId) {
     if (!guildId) {
         return true;
     }
 
-    const row = await db.get(
-        "SELECT prefix FROM guilds WHERE id = ?",
-        String(guildId)
-    );
-
-    if (!row) {
-        return true;
-    }
-
-    return Number(row.prefix) !== 0;
+    const settings = await getGuildSettings(guildId);
+    return settings.prefix;
 }
 
 async function setPrefixEnabled(guildId, enabled) {
-    await db.run(
-        `INSERT INTO guilds(id, prefix) VALUES(?, ?)
-         ON CONFLICT(id) DO UPDATE SET prefix = excluded.prefix`,
-        String(guildId),
-        enabled ? 1 : 0
-    );
+    const current = await getGuildSettings(guildId);
+    await saveGuildSettings(guildId, { ...current, prefix: enabled });
 }
 
 module.exports = {
@@ -705,5 +787,7 @@ module.exports = {
     listStaff,
     isPrefixEnabled,
     setPrefixEnabled,
+    getGuildSettings,
+    saveGuildSettings,
     neededXp
 };

@@ -140,17 +140,27 @@ async function shutdown(signal) {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-(async () => {
-    try {
-        await economy.initDatabase();
+async function startBot() {
+    await economy.initDatabase();
 
-        if (!process.env.DISCORD_TOKEN) {
-            throw new Error("DISCORD_TOKEN не найден");
-        }
+    if (!process.env.DISCORD_TOKEN) {
+        console.warn("DISCORD_TOKEN не найден — бот не залогинен, сайт всё равно работает");
+        return client;
+    }
 
-        await client.login(process.env.DISCORD_TOKEN);
-    } catch (error) {
+    await client.login(process.env.DISCORD_TOKEN);
+    return client;
+}
+
+if (require.main === module) {
+    startBot().catch(error => {
         console.error("Ошибка запуска:", error);
         process.exit(1);
-    }
-})();
+    });
+}
+
+module.exports = {
+    client,
+    startBot
+};
+

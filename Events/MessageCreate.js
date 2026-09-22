@@ -24,11 +24,16 @@ module.exports = {
             return;
         }
 
-        if (message.guild && !(await economy.isPrefixEnabled(message.guild.id))) {
-            return;
+        let prefix = PREFIX;
+        if (message.guild) {
+            const settings = await economy.getGuildSettings(message.guild.id);
+            if (!settings.prefix) {
+                return;
+            }
+            prefix = settings.prefixText || PREFIX;
         }
 
-        const rest = stripPrefix(message.content, PREFIX, client.user.id);
+        const rest = stripPrefix(message.content, prefix, client.user.id);
         if (rest === null) {
             return;
         }

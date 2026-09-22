@@ -14,6 +14,7 @@ test("stripPrefix: обычный префикс и упоминание бот�
     assert.equal(stripPrefix("<@99> top level", "!", "99"), "top level");
     assert.equal(stripPrefix("<@!99> pay 100", "!", "99"), "pay 100");
     assert.equal(stripPrefix("rob", "!", "99"), null);
+    assert.equal(stripPrefix("bh!pay all", "bh!", "99"), "pay all");
 });
 
 test("splitCommand: имя и хвост", () => {

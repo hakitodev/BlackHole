@@ -1,18 +1,21 @@
 const http = require("http");
+const { handleRequest } = require("./Web/app");
+const { client, startBot } = require("./index.js");
 
 const port = Number(process.env.PORT) || 3000;
 
 http.createServer((req, res) => {
-    if (req.url === "/health") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
-        return;
-    }
-
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("BlackHole Bot is running");
+    handleRequest(req, res, client).catch(error => {
+        console.error(error);
+        if (!res.headersSent) {
+            res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        }
+        res.end("Internal error");
+    });
 }).listen(port, () => {
-    console.log(`Keep-alive server started on port ${port}`);
+    console.log(`Сайт: http://localhost:${port}`);
 });
 
-require("./index.js");
+startBot().catch(error => {
+    console.error("Ошибка запуска бота:", error);
+});

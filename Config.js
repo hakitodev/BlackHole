@@ -39,7 +39,9 @@ function loadServers() {
 
 module.exports = {
     CLIENT_ID: process.env.CLIENT_ID || "",
+    CLIENT_SECRET: process.env.CLIENT_SECRET || "",
     OWNER_ID: process.env.OWNER_ID || "",
     PREFIX: (process.env.PREFIX ?? "!").trim() || "!",
+    PUBLIC_URL: (process.env.PUBLIC_URL || "").replace(/\/$/, ""),
     SERVERS: loadServers()
 };

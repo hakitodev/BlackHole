@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { PUBLIC_URL } = require("../Config");
 const economy = require("../Database/Economy");
 const { reply, error } = require("../Utils/reply");
 
@@ -42,10 +43,14 @@ module.exports = {
         const enabled = interaction.options.getString("mode") === "prefix";
         await economy.setPrefixEnabled(interaction.guild.id, enabled);
 
-        return reply(interaction, {
-            description: enabled
-                ? "Префикс-команды включены."
-                : "Только слэш-команды."
-        });
+        let description = enabled
+            ? "Префикс-команды включены."
+            : "Только слэш-команды.";
+
+        if (PUBLIC_URL) {
+            description += `\nСайт: ${PUBLIC_URL}/servers/${interaction.guild.id}`;
+        }
+
+        return reply(interaction, { description });
     }
 };
