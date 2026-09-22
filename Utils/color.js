@@ -1,7 +1,15 @@
+function isHexColor(value) {
+    return /^#[0-9A-F]{6}$/i.test(String(value ?? "").trim());
+}
+
 function parseColor(value, fallback = 0x5865F2) {
     const raw = String(value ?? "").trim();
     if (!raw) {
         return fallback;
+    }
+
+    if (isHexColor(raw)) {
+        return parseInt(raw.slice(1), 16);
     }
 
     const hex = raw.startsWith("#") ? raw.slice(1) : raw;
@@ -35,6 +43,7 @@ function isUrl(value) {
 }
 
 module.exports = {
+    isHexColor,
     parseColor,
     toHex,
     isUrl

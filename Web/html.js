@@ -4,6 +4,7 @@ const { EVENT_TYPES } = require("../Utils/events");
 const { COMMANDS, RANGES } = require("../Utils/commands");
 const { tagsFor } = require("../Utils/placeholders");
 const { toHex } = require("../Utils/color");
+const { DROP_KINDS } = require("../Utils/boxes");
 
 const GUILD_TABS = [
     { id: "general", title: "Общие" },
@@ -11,7 +12,8 @@ const GUILD_TABS = [
     { id: "automod", title: "Автомод" },
     { id: "shop", title: "Магаз сервера" },
     { id: "jobs", title: "Работы" },
-    { id: "biz", title: "Бизнесы" }
+    { id: "biz", title: "Бизнесы" },
+    { id: "boxes", title: "Боксы" }
 ];
 
 const MODULES = [
@@ -67,7 +69,7 @@ function sideNav({
     if (guild) {
         bits.push(accordion("Сервер", GUILD_TABS.map(item =>
             navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
-        ).join(""), ["general", "autorole", "automod", "shop", "jobs", "biz"].includes(module)));
+        ).join(""), ["general", "autorole", "automod", "shop", "jobs", "biz", "boxes"].includes(module)));
 
         bits.push(accordion("Команды", COMMANDS.map(item =>
             navLink(
@@ -94,7 +96,10 @@ function sideNav({
     if (admin) {
         bits.push(accordion("Админ", [
             navLink("/admin/users", "Юзеры", path === "/admin/users"),
-            navLink("/admin/shop", "Всемирный шоп", path === "/admin/shop")
+            navLink("/admin/shop", "Всемирный шоп", path === "/admin/shop"),
+            navLink("/admin/jobs", "Всемирные работы", path === "/admin/jobs"),
+            navLink("/admin/biz", "Всемирные бизнесы", path === "/admin/biz"),
+            navLink("/admin/boxes", "Всемирные боксы", path === "/admin/boxes")
         ].join(""), path.startsWith("/admin")));
     }
 
@@ -396,6 +401,121 @@ function commandEditor(guild, command = {}, bot) {
       </form>`;
 }
 
+function dropSummary(drop) {
+    if (!drop) {
+        return "";
+    }
+    if (drop.kind === "coins") {
+        const range = drop.min === drop.max ? `${drop.min}` : `${drop.min}–${drop.max}`;
+        return drop.jackpot ? `монеты ${range} · джекпот` : `монеты ${range}`;
+    }
+    if (drop.kind === "job_xp") {
+        return `свиток ×${drop.steps || 1}`;
+    }
+    if (drop.kind === "biz_boost") {
+        return `буст +${drop.percent || 10}% ${drop.type || ""}`.trim();
+    }
+    if (drop.kind === "box") {
+        return `бокс ${drop.boxId || ""}`;
+    }
+    if (drop.kind === "item") {
+        return `${drop.itemId || "item"} ×${drop.qty || 1}`;
+    }
+    if (drop.kind === "role") {
+        return `${drop.name || "роль"} ${drop.hex || ""}`.trim();
+    }
+    return drop.kind;
+}
+
+function dropFields() {
+    return `
+        <div class="split">
+          <label><span>Тип награды</span>
+            <select name="kind">
+              ${DROP_KINDS.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label><span>Вес шанса</span>
+            <input type="number" name="weight" min="1" value="10">
+          </label>
+        </div>
+        <div class="split">
+          <label><span>Мин. монет</span><input type="number" name="min" min="0" value="0"></label>
+          <label><span>Макс. монет</span><input type="number" name="max" min="0" value="0"></label>
+        </div>
+        <label class="switch">
+          <input type="checkbox" name="jackpot" value="1">
+          Джекпот
+        </label>
+        <div class="split">
+          <label><span>Ступени профессии</span><input type="number" name="steps" min="1" value="1"></label>
+          <label><span>Буст бизнеса %</span><input type="number" name="percent" min="1" value="10"></label>
+        </div>
+        <div class="split">
+          <label><span>Тип бизнеса</span><input type="text" name="type" placeholder="cafe"></label>
+          <label><span>ID другого бокса</span><input type="text" name="boxId" placeholder="box_iron"></label>
+        </div>
+        <div class="split">
+          <label><span>ID предмета</span><input type="text" name="itemId" placeholder="coffee"></label>
+          <label><span>Кол-во</span><input type="number" name="qty" min="1" value="1"></label>
+        </div>
+        <div class="split">
+          <label><span>HEX роли</span><input type="text" name="hex" placeholder="#FF0055"></label>
+          <label><span>Имя роли</span><input type="text" name="name" placeholder="Розовый"></label>
+        </div>`;
+}
+
+function boxConstructor(action, boxes = []) {
+    const cards = (boxes || []).map(box => `
+      <article class="card" style="margin-top:16px">
+        <h3>${escapeHtml(box.emoji || "📦")} ${escapeHtml(box.name)} <code>${escapeHtml(box.id)}</code></h3>
+        <p class="muted">${escapeHtml(box.description || "")}</p>
+        <form method="post" action="${action}" class="inline">
+          <input type="hidden" name="op" value="delete">
+          <input type="hidden" name="id" value="${escapeHtml(box.id)}">
+          <button class="btn ghost" type="submit">Удалить бокс</button>
+        </form>
+        <table class="table">
+          <thead><tr><th>Тип</th><th>Вес</th><th>Награда</th><th></th></tr></thead>
+          <tbody>
+            ${(box.drops || []).map(drop => `
+              <tr>
+                <td>${escapeHtml(drop.kind)}</td>
+                <td>${escapeHtml(String(drop.weight))}</td>
+                <td>${escapeHtml(dropSummary(drop))}</td>
+                <td>
+                  <form method="post" action="${action}">
+                    <input type="hidden" name="op" value="delete_drop">
+                    <input type="hidden" name="dropId" value="${escapeHtml(String(drop.id || ""))}">
+                    <button class="btn ghost" type="submit">Удалить</button>
+                  </form>
+                </td>
+              </tr>`).join("") || `<tr><td colspan="4" class="muted">Нет строк дропа.</td></tr>`}
+          </tbody>
+        </table>
+        <form class="stack" method="post" action="${action}">
+          <input type="hidden" name="op" value="save_drop">
+          <input type="hidden" name="boxId" value="${escapeHtml(box.id)}">
+          ${dropFields()}
+          <button class="btn" type="submit">Добавить дроп</button>
+        </form>
+      </article>`).join("");
+
+    return `
+      ${cards || `<p class="muted">Сначала сохрани бокс, потом таблицу шансов.</p>`}
+      <form class="stack card" method="post" action="${action}" style="margin-top:20px">
+        <h2>Новый бокс</h2>
+        <input type="hidden" name="op" value="save">
+        <div class="split">
+          <label><span>ID латиницей</span><input type="text" name="id" placeholder="box_neon" required></label>
+          <label><span>Эмодзи</span><input type="text" name="emoji" placeholder="📦"></label>
+        </div>
+        <label><span>Название</span><input type="text" name="name" placeholder="Неоновый бокс" required></label>
+        <label><span>Описание</span><textarea name="description"></textarea></label>
+        <button class="btn" type="submit">Сохранить бокс</button>
+      </form>`;
+}
+
 function catalogTable(items, action, kind) {
     const extra = kind === "job" ? "Ур. / ×" : "Цена / доход";
     const rows = (items || []).map(item => `
@@ -544,6 +664,14 @@ function moduleForm(module, guild, settings, extras) {
           </div>`;
     }
 
+    if (module === "boxes") {
+        return `
+          <div class="stack card">
+            <h2>Боксы сервера</h2>
+            ${boxConstructor(action, extras.boxes || [])}
+          </div>`;
+    }
+
     return `
       <form class="stack card" method="post" action="${action}">
         <h2>Общие</h2>
@@ -626,6 +754,7 @@ function settingsPage(opts) {
         shop = [],
         jobs = [],
         businesses = [],
+        boxes = [],
         owner = false,
         editCommand = null,
         module = "general",
@@ -673,7 +802,7 @@ function settingsPage(opts) {
               </form>`;
         }
     } else {
-        inner = moduleForm(module, guild, data, { channels, roles, shop, jobs, businesses, event, bot, owner });
+        inner = moduleForm(module, guild, data, { channels, roles, shop, jobs, businesses, boxes, event, bot, owner });
     }
 
     return layout({
@@ -835,6 +964,43 @@ function adminShopPage({ user, admin, bot, items = [], saved, error }) {
     });
 }
 
+function adminCatalogPage({ user, admin, bot, kind, items = [], saved, error }) {
+    const title = kind === "job" ? "Всемирные работы" : "Всемирные бизнесы";
+    const path = kind === "job" ? "/admin/jobs" : "/admin/biz";
+    return layout({
+        title,
+        user,
+        admin,
+        bot,
+        path,
+        body: `
+          <h1>${escapeHtml(title)}</h1>
+          ${saved ? `<div class="flash">Сохранено.</div>` : ""}
+          ${error ? `<div class="warn">${escapeHtml(error)}</div>` : ""}
+          <div class="card">
+            ${catalogTable(items, path, kind)}
+            ${catalogEditor(kind, path)}
+          </div>
+        `
+    });
+}
+
+function adminBoxesPage({ user, admin, bot, boxes = [], saved, error }) {
+    return layout({
+        title: "Всемирные боксы",
+        user,
+        admin,
+        bot,
+        path: "/admin/boxes",
+        body: `
+          <h1>Всемирные боксы</h1>
+          ${saved ? `<div class="flash">Сохранено.</div>` : ""}
+          ${error ? `<div class="warn">${escapeHtml(error)}</div>` : ""}
+          ${boxConstructor("/admin/boxes", boxes)}
+        `
+    });
+}
+
 function errorPage({ user, admin, bot, guild, custom, message, action }) {
     return layout({
         title: "Ошибка",
@@ -856,5 +1022,7 @@ module.exports = {
     usersPage,
     economyPage: usersPage,
     adminShopPage,
+    adminCatalogPage,
+    adminBoxesPage,
     errorPage
 };

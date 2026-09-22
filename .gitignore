@@ -5,3 +5,5 @@ node_modules/
 *.sqlite-shm
 .env
 .DS_Store
+servers.json
+

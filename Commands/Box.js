@@ -2,28 +2,99 @@ const {
     SlashCommandBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    PermissionFlagsBits
 } = require("discord.js");
 const economy = require("../Database/Economy");
-const { BOXES, byQuery, roll } = require("../Utils/boxes");
+const { byQuery, mergeBoxes, formatDrop } = require("../Utils/boxes");
 const { forInteraction } = require("../Utils/scope");
+const { isHexColor, parseColor } = require("../Utils/color");
 const { reply, error, COLOR } = require("../Utils/reply");
 
-function boxButtons(owned) {
+function boxButtons(boxes) {
     return new ActionRowBuilder().addComponents(
-        BOXES.map(box =>
+        boxes.slice(0, 5).map(box =>
             new ButtonBuilder()
                 .setCustomId(`box_${box.id}`)
                 .setLabel(box.name)
                 .setStyle(ButtonStyle.Secondary)
-                .setDisabled(!owned.has(box.id))
         )
     );
 }
 
-async function openOwned(userId, box, scope, random) {
-    const loot = roll(box, random);
-    return economy.openBox(userId, box.id, loot.amount, scope).then(result => ({ ...result, ...loot, box }));
+async function catalog(guildId, settings) {
+    const globalOn = settings?.shopGlobal !== false;
+    const guildOn = Boolean(guildId) && settings?.shopGuild !== false;
+    const [globalBoxes, guildBoxes] = await Promise.all([
+        globalOn ? economy.listBoxes("global") : [],
+        guildOn ? economy.listBoxes(guildId) : []
+    ]);
+    return mergeBoxes(globalBoxes, guildBoxes);
+}
+
+async function giveRole(interaction, pending) {
+    if (!pending?.hex || !isHexColor(pending.hex)) {
+        return { ok: false, text: "В дропе нет цвета роли." };
+    }
+    if (!interaction.guild) {
+        return { ok: false, text: "Роль только на сервере." };
+    }
+    const me = interaction.guild.members.me;
+    if (!me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+        return { ok: false, text: "Боту нужны права на роли." };
+    }
+    const color = parseColor(pending.hex, null);
+    if (color == null) {
+        return { ok: false, text: "Цвет роли битый." };
+    }
+    try {
+        const role = await interaction.guild.roles.create({
+            name: String(pending.name || "Цветная роль").slice(0, 100),
+            color,
+            reason: `box ${interaction.user.id}`
+        });
+        await interaction.member.roles.add(role);
+        return { ok: true, text: `роль **${role.name}**` };
+    } catch {
+        return { ok: false, text: "Не вышло выдать роль." };
+    }
+}
+
+function lootText(result) {
+    if (!result.ok) {
+        return "Нет такого бокса.";
+    }
+    const box = result.box || {};
+    const extras = result.extras || {};
+    if (extras.role) {
+        return extras.roleText
+            ? `Открыл ${box.emoji || "📦"} **${box.name || "бокс"}** — ${extras.roleText}`
+            : `Открыл ${box.emoji || "📦"} **${box.name || "бокс"}** — роль.`;
+    }
+    const jackpot = result.jackpot ? " Джекпот." : "";
+    return `Открыл ${box.emoji || "📦"} **${box.name || "бокс"}** — ${formatDrop(result.drop, {
+        amount: result.amount,
+        job: extras.job?.name,
+        biz: extras.biz
+    })}.${jackpot}`;
+}
+
+async function openOwned(interaction, userId, box, scope) {
+    const result = await economy.openBox(userId, box.id, null, scope);
+    if (!result.ok) {
+        return result;
+    }
+    result.box = result.box || box;
+    const pending = result.extras?.role;
+    if (pending) {
+        const given = await giveRole(interaction, pending);
+        if (!given.ok) {
+            await economy.grantItem(userId, box.id, 1, scope);
+            return { ok: false, reason: "role", text: given.text };
+        }
+        result.extras.roleText = given.text;
+    }
+    return result;
 }
 
 module.exports = {
@@ -41,26 +112,26 @@ module.exports = {
     aliases: ["case", "lootbox"],
 
     async execute(interaction) {
-        const { scope } = await forInteraction(interaction);
+        const { scope, settings } = await forInteraction(interaction);
         const query = interaction.options.getString("item");
+        const boxes = await catalog(interaction.guildId, settings);
         const inv = await economy.getInventory(interaction.user.id, scope);
         const owned = new Map(inv.map(row => [row.item_id, row.qty]));
-        const have = BOXES.filter(box => owned.get(box.id) > 0);
+        const have = boxes.filter(box => owned.get(box.id) > 0);
 
         const open = async box => {
-            const result = await openOwned(interaction.user.id, box, scope);
+            const result = await openOwned(interaction, interaction.user.id, box, scope);
             if (!result.ok) {
-                return error(interaction, "Нет такого бокса.");
+                return error(interaction, result.text || "Нет такого бокса.");
             }
-            const jackpot = result.jackpot ? " Джекпот." : "";
             return reply(interaction, {
                 color: result.jackpot ? COLOR.gold : COLOR.pink,
-                description: `Открыл ${box.emoji} **${box.name}** — **+${result.amount}**.${jackpot}`
+                description: lootText(result)
             });
         };
 
         if (query) {
-            const box = byQuery(query);
+            const box = byQuery(query, boxes) || byQuery(query);
             if (!box) {
                 return error(interaction, "Такого бокса нет.");
             }
@@ -79,7 +150,7 @@ module.exports = {
             color: COLOR.pink,
             title: "Боксы",
             description: have.map(box => `${box.emoji} **${box.name}** × **${owned.get(box.id)}**`).join("\n"),
-            components: [boxButtons(new Set(have.map(box => box.id)))],
+            components: [boxButtons(have)],
             fetchReply: true
         }).catch(() => null);
 
@@ -94,21 +165,17 @@ module.exports = {
         }
 
         collector.on("collect", async i => {
-            const box = byQuery(String(i.customId).slice(4));
+            const box = byQuery(String(i.customId).slice(4), boxes) || byQuery(String(i.customId).slice(4));
             if (!box) {
                 await i.deferUpdate().catch(() => {});
                 return;
             }
-            const result = await openOwned(interaction.user.id, box, scope);
+            const result = await openOwned(interaction, interaction.user.id, box, scope);
             collector.stop("opened");
-            const jackpot = result.ok && result.jackpot ? " Джекпот." : "";
-            const text = result.ok
-                ? `Открыл ${box.emoji} **${box.name}** — **+${result.amount}**.${jackpot}`
-                : "Нет такого бокса.";
             await i.update({
                 embeds: [{
                     color: result.ok ? COLOR.pink : COLOR.red,
-                    description: text
+                    description: result.ok ? lootText(result) : (result.text || "Нет такого бокса.")
                 }],
                 components: []
             }).catch(() => {});

@@ -121,7 +121,10 @@ after(async () => {
 
 test("GET /health", async () => {
     const res = mockRes();
-    await handleRequest(mockReq({ url: "/health" }), res, fakeClient());
+    await handleRequest(mockReq({
+        url: "/health",
+        headers: { cookie: "bh=dead" }
+    }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).ok, true);
     assert.equal(res.headers["Content-Encoding"], undefined);
@@ -366,6 +369,60 @@ test("высший модер правит экономику и глобаль�
     assert.equal(item.price, 12);
 });
 
+test("высший модер правит всемирные боксы и работы", async () => {
+    await economy.addStaff("1", "owner", 2);
+    const cookie = await sessionCookie();
+
+    const box = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: "/admin/boxes",
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=save&id=box_neon&name=Неон&emoji=%F0%9F%93%A6&description=тест"
+    }), box, fakeClient());
+    assert.equal(box.statusCode, 302);
+    const listed = await economy.listBoxes("global");
+    assert.ok(listed.some(item => item.id === "box_neon"));
+
+    const drop = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: "/admin/boxes",
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=save_drop&boxId=box_neon&kind=coins&weight=10&min=20&max=40"
+    }), drop, fakeClient());
+    assert.equal(drop.statusCode, 302);
+
+    const page = mockRes();
+    await handleRequest(mockReq({
+        url: "/admin/boxes",
+        headers: { cookie }
+    }), page, fakeClient());
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /Неон/);
+    assert.match(page.body, /монеты/);
+
+    const jobs = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: "/admin/jobs",
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=save&id=baker&name=Пекарь&minLevel=2&mult=1.3"
+    }), jobs, fakeClient());
+    assert.equal(jobs.statusCode, 302);
+    const catalog = await economy.listCatalog("global", "job");
+    assert.ok(catalog.some(item => item.id === "baker"));
+});
+
 test("GET /servers/:id без прав — 403", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
@@ -463,6 +520,17 @@ test("POST /cmd/daily пишет диапазон", async () => {
     assert.equal(settings.dailyMin, 10);
     assert.equal(settings.dailyMax, 20);
     assert.equal(settings.disabledCommands.includes("daily"), false);
+});
+
+test("GET /servers/:id/boxes конструктор дропа", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: `/servers/${GUILD_ID}/boxes`,
+        headers: { cookie: await sessionCookie() }
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /Боксы сервера/);
+    assert.match(res.body, /Новый бокс/);
 });
 
 test("GET timeout ивент есть", async () => {

@@ -70,6 +70,54 @@ test("бокс открывается из инвентаря", async () => {
     assert.equal((await economy.getInventory(id)).length, 0);
 });
 
+test("бокс: параллельный open не дюпает", async () => {
+    const id = uid();
+    await economy.setInventoryItem(id, "box_wood", 1);
+    const results = await Promise.all([
+        economy.openBox(id, "box_wood", 40),
+        economy.openBox(id, "box_wood", 40)
+    ]);
+    assert.equal(results.filter(item => item.ok).length, 1);
+    assert.equal((await economy.getUser(id)).balance, 40);
+    assert.equal((await economy.getInventory(id)).length, 0);
+});
+
+test("бокс: дроп монет из таблицы внутри транзакции", async () => {
+    const id = uid();
+    await economy.saveBox("global", { id: "box_test", name: "Тест", emoji: "📦" });
+    await economy.saveDrop("global", "box_test", { kind: "coins", weight: 1, min: 50, max: 50 });
+    await economy.setInventoryItem(id, "box_test", 1);
+    const opened = await economy.openBox(id, "box_test");
+    assert.equal(opened.ok, true);
+    assert.equal(opened.amount, 50);
+    assert.equal((await economy.getUser(id)).balance, 50);
+});
+
+test("бокс: свиток профессии и буст бизнеса", async () => {
+    const id = uid();
+    const def = getBusiness("stall");
+    await economy.addBalance(id, def.price);
+    await economy.buyBusiness(id, def.id, def);
+    await economy.setJob(id, "intern");
+    await economy.saveBox("global", { id: "box_scroll", name: "Свиток", emoji: "📜" });
+    await economy.saveDrop("global", "box_scroll", { kind: "job_xp", weight: 1, steps: 1 });
+    await economy.setInventoryItem(id, "box_scroll", 1);
+    const jobDrop = await economy.openBox(id, "box_scroll");
+    assert.equal(jobDrop.ok, true);
+    assert.equal((await economy.getUser(id)).job, "courier");
+
+    await economy.saveBox("global", { id: "box_boost", name: "Буст", emoji: "📈" });
+    await economy.saveDrop("global", "box_boost", { kind: "biz_boost", weight: 1, percent: 100, type: "stall" });
+    await economy.setInventoryItem(id, "box_boost", 1);
+    const boost = await economy.openBox(id, "box_boost");
+    assert.equal(boost.ok, true);
+    const later = Date.now() + 60 * 60 * 1000;
+    const peek = await economy.peekBusiness(id, def.id, def, later);
+    const base = Math.floor((def.income / 60) * 3600);
+    assert.ok(peek.unclaimed > base);
+    assert.ok(peek.unclaimed <= def.cap);
+});
+
 test("бизнес: купить, кап, collect", async () => {
     const id = uid();
     const def = getBusiness("stall");

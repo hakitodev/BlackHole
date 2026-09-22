@@ -149,3 +149,24 @@ test("setUser и инвентарь", async () => {
     const gone = await economy.getUser(id);
     assert.equal(gone.balance, 0);
 });
+
+test("HEX роли только #RRGGBB", () => {
+    const { isHexColor } = require("../Utils/color");
+    assert.equal(isHexColor("#FF0055"), true);
+    assert.equal(isHexColor("#ff0055"), true);
+    assert.equal(isHexColor("ff0055"), false);
+    assert.equal(isHexColor("#fff"), false);
+    assert.equal(isHexColor("#GG0000"), false);
+});
+
+test("теги кастом-команд фильтруются", () => {
+    const { tagsFor } = require("../Utils/placeholders");
+    const tags = tagsFor("custom").map(item => item.tag);
+    assert.ok(tags.includes("{user.id}"));
+    assert.ok(tags.includes("{guild.id}"));
+    assert.ok(tags.includes("{balance}"));
+    assert.ok(tags.includes("{level}"));
+    assert.ok(tags.includes("{xp}"));
+    assert.ok(tags.includes("{business.count}"));
+    assert.equal(tags.includes("{invite}"), false);
+});

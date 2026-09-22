@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const economy = require("../Database/Economy");
-const { SERVERS, PREFIX } = require("../Config");
+const { PREFIX } = require("../Config");
 
 let dir;
 
@@ -54,30 +54,25 @@ test("saveGuildSettings: пустой префикс откатывается к
     assert.equal(saved.prefixText, PREFIX);
 });
 
-test("servers.json сидирует только при первом создании", async () => {
-    const id = Object.keys(SERVERS)[0];
-    if (!id) {
-        return;
-    }
-
+test("новый сервер сразу пишется в БД без servers.json", async () => {
+    const id = "999000111222333001";
     const first = await economy.getGuildSettings(id);
-    assert.equal(first.welcomeOn, true);
-    assert.equal(first.welcomeChannel, SERVERS[id].channelId);
-    assert.equal(first.welcomeMessage, SERVERS[id].welcomeMessage);
+    assert.equal(first.welcomeOn, false);
+    assert.equal(first.welcomeChannel, "");
+    assert.equal(first.welcomeMessage, "");
+    assert.equal(first.prefix, true);
 
     await economy.saveGuildSettings(id, {
         prefix: true,
         prefixText: PREFIX,
-        welcomeOn: false,
-        welcomeChannel: "",
-        welcomeMessage: "",
-        leaveMessage: ""
+        welcomeOn: true,
+        welcomeChannel: "123456789012345678",
+        welcomeMessage: "йо"
     });
 
     const second = await economy.getGuildSettings(id);
-    assert.equal(second.welcomeOn, false);
-    assert.equal(second.welcomeChannel, "");
-    assert.equal(second.welcomeMessage, "");
+    assert.equal(second.welcomeOn, true);
+    assert.equal(second.welcomeMessage, "йо");
 });
 
 test("saveGuildSettings: частичный апдейт не трёт welcome", async () => {

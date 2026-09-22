@@ -21,6 +21,8 @@ const {
     settingsPage,
     usersPage,
     adminShopPage,
+    adminCatalogPage,
+    adminBoxesPage,
     errorPage
 } = require("./html");
 const { asList } = require("../Utils/ids");
@@ -385,10 +387,33 @@ async function handleAdminUsers(req, res, url, user, admin, bot, cookies, client
     }), cookies);
 }
 
+async function handleBoxForm(scope, form) {
+    if (form.op === "delete") {
+        await economy.deleteBox(scope, form.id);
+        return;
+    }
+    if (form.op === "delete_drop") {
+        await economy.deleteDrop(scope, form.dropId);
+        return;
+    }
+    if (form.op === "save_drop") {
+        await economy.saveDrop(scope, form.boxId, form);
+        return;
+    }
+    await economy.saveBox(scope, form);
+}
+
 async function handleRequest(req, res, client) {
     if (!res.req) {
         res.req = req;
     }
+    const pathOnly = String(req.url || "").split("?")[0];
+    if (req.method === "GET" && pathOnly === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+    }
+
     const url = new URL(req.url, "http://localhost");
     let session = await sessionFromRequest(req);
     if (session) {
@@ -398,12 +423,6 @@ async function handleRequest(req, res, client) {
     const admin = user ? await isBotAdmin(user.id, client) : false;
     const cookies = sessionCookie(session);
     const bot = botInfo(client);
-
-    if (url.pathname === "/health") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
-        return;
-    }
 
     if (url.pathname === "/style.css") {
         sendRaw(res, 200, STYLE, { "Content-Type": "text/css; charset=utf-8" });
@@ -487,7 +506,9 @@ async function handleRequest(req, res, client) {
         return;
     }
 
-    if (url.pathname === "/admin/users" || url.pathname === "/admin/shop") {
+    if (url.pathname === "/admin/users" || url.pathname === "/admin/shop"
+        || url.pathname === "/admin/jobs" || url.pathname === "/admin/biz"
+        || url.pathname === "/admin/boxes") {
         if (!user) {
             redirect(res, "/login");
             return;
@@ -502,27 +523,88 @@ async function handleRequest(req, res, client) {
             return;
         }
 
+        if (url.pathname === "/admin/shop") {
+            if (req.method === "POST") {
+                try {
+                    const form = parseForm(await readBody(req));
+                    if (form.op === "delete") {
+                        await economy.deleteShopItem("global", form.id);
+                    } else {
+                        const saved = await economy.saveShopItem("global", form);
+                        if (!saved.ok) {
+                            send(res, 200, adminShopPage({
+                                user,
+                                admin,
+                                bot,
+                                items: await economy.listShopItems("global"),
+                                error: saved.reason === "hex" ? "HEX роли: #RRGGBB." : "Не сохранилось."
+                            }), cookies);
+                            return;
+                        }
+                    }
+                    redirect(res, "/admin/shop?saved=1", cookies);
+                } catch (error) {
+                    console.error(error);
+                    send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить шоп." }), cookies);
+                }
+                return;
+            }
+
+            send(res, 200, adminShopPage({
+                user,
+                admin,
+                bot,
+                items: await economy.listShopItems("global"),
+                saved: url.searchParams.get("saved") === "1"
+            }), cookies);
+            return;
+        }
+
+        if (url.pathname === "/admin/jobs" || url.pathname === "/admin/biz") {
+            const kind = url.pathname === "/admin/jobs" ? "job" : "biz";
+            const pathName = url.pathname;
+            if (req.method === "POST") {
+                try {
+                    const form = parseForm(await readBody(req));
+                    if (form.op === "delete") {
+                        await economy.deleteCatalogItem("global", kind, form.id);
+                    } else {
+                        await economy.saveCatalogItem("global", kind, form);
+                    }
+                    redirect(res, `${pathName}?saved=1`, cookies);
+                } catch (error) {
+                    console.error(error);
+                    send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить каталог." }), cookies);
+                }
+                return;
+            }
+            send(res, 200, adminCatalogPage({
+                user,
+                admin,
+                bot,
+                kind,
+                items: await economy.listCatalog("global", kind),
+                saved: url.searchParams.get("saved") === "1"
+            }), cookies);
+            return;
+        }
+
         if (req.method === "POST") {
             try {
-                const form = parseForm(await readBody(req));
-                if (form.op === "delete") {
-                    await economy.deleteShopItem("global", form.id);
-                } else {
-                    await economy.saveShopItem("global", form);
-                }
-                redirect(res, "/admin/shop?saved=1", cookies);
+                await handleBoxForm("global", parseForm(await readBody(req)));
+                redirect(res, "/admin/boxes?saved=1", cookies);
             } catch (error) {
                 console.error(error);
-                send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить шоп." }), cookies);
+                send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить боксы." }), cookies);
             }
             return;
         }
 
-        send(res, 200, adminShopPage({
+        send(res, 200, adminBoxesPage({
             user,
             admin,
             bot,
-            items: await economy.listShopItems("global"),
+            boxes: await economy.listBoxes("global"),
             saved: url.searchParams.get("saved") === "1"
         }), cookies);
         return;
@@ -573,7 +655,7 @@ async function handleRequest(req, res, client) {
         }
 
         if (module !== "cmd" && module !== "custom" && !eventType(module)
-            && !["general", "autorole", "automod", "shop", "jobs", "biz"].includes(module)) {
+            && !["general", "autorole", "automod", "shop", "jobs", "biz", "boxes"].includes(module)) {
             send(res, 404, errorPage({ user, admin, bot, message: "Страница не найдена." }), cookies);
             return;
         }
@@ -629,9 +711,24 @@ async function handleRequest(req, res, client) {
                     if (form.op === "delete") {
                         await economy.deleteShopItem(guildId, form.id);
                     } else {
-                        await economy.saveShopItem(guildId, form);
+                        const saved = await economy.saveShopItem(guildId, form);
+                        if (!saved.ok) {
+                            send(res, 200, errorPage({
+                                user,
+                                admin,
+                                bot,
+                                guild: { id: guild.id, name: guild.name },
+                                message: saved.reason === "hex" ? "HEX роли: строго #RRGGBB." : "Не сохранилось."
+                            }), cookies);
+                            return;
+                        }
                     }
                     redirect(res, `/servers/${guildId}/shop?saved=1`, cookies);
+                    return;
+                }
+                if (module === "boxes") {
+                    await handleBoxForm(guildId, form);
+                    redirect(res, `/servers/${guildId}/boxes?saved=1`, cookies);
                     return;
                 }
                 if (module === "jobs" || module === "biz") {
@@ -680,6 +777,7 @@ async function handleRequest(req, res, client) {
             shop: module === "shop" ? await economy.listShopItems(guildId) : [],
             jobs: module === "jobs" ? await economy.listCatalog(guildId, "job") : [],
             businesses: module === "biz" ? await economy.listCatalog(guildId, "biz") : [],
+            boxes: module === "boxes" ? await economy.listBoxes(guildId) : [],
             owner: isOwner({ client, user }),
             editCommand: module === "custom" && customName
                 ? await economy.getCustomCommand(guildId, customName)

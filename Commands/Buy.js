@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const economy = require("../Database/Economy");
 const { get, find, list, format } = require("../Utils/shop");
 const { forInteraction } = require("../Utils/scope");
-const { parseColor } = require("../Utils/color");
+const { parseColor, isHexColor } = require("../Utils/color");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -72,7 +72,10 @@ module.exports = {
             if (!me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
                 return error(interaction, "Боту нужны права на роли.");
             }
-            const hex = item.hex || item.extra?.hex;
+            const hex = String(item.hex || item.extra?.hex || "").trim();
+            if (!isHexColor(hex)) {
+                return error(interaction, "У роли нет цвета.");
+            }
             const color = parseColor(hex, null);
             if (color == null) {
                 return error(interaction, "У роли нет цвета.");
