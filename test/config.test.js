@@ -88,3 +88,10 @@ test("Config: свой PUBLIC_URL важнее Render", () => {
     });
     assert.equal(config.PUBLIC_URL, "https://bot.example.com");
 });
+
+test("Config: обрезает случайный /oauth/callback в PUBLIC_URL", () => {
+    const config = loadConfig({
+        PUBLIC_URL: "https://blackhole-d7h5.onrender.com/oauth/callback/"
+    });
+    assert.equal(config.PUBLIC_URL, "https://blackhole-d7h5.onrender.com");
+});

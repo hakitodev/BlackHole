@@ -37,18 +37,32 @@ function loadServers() {
     return parseServers(fs.readFileSync(filePath, "utf8"), filePath) ?? {};
 }
 
+function normalizePublicUrl(raw) {
+    let url = String(raw || "").trim();
+    if (!url) {
+        return "";
+    }
+
+    url = url.replace(/\/+$/, "");
+    while (/\/oauth\/callback$/i.test(url)) {
+        url = url.replace(/\/oauth\/callback$/i, "").replace(/\/+$/, "");
+    }
+
+    return url;
+}
+
 function resolvePublicUrl() {
-    const explicit = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    const explicit = normalizePublicUrl(process.env.PUBLIC_URL);
     if (explicit) {
         return explicit;
     }
 
-    const render = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
+    const render = normalizePublicUrl(process.env.RENDER_EXTERNAL_URL);
     if (render) {
         return render;
     }
 
-    const railway = (process.env.RAILWAY_PUBLIC_DOMAIN || "").replace(/\/$/, "");
+    const railway = normalizePublicUrl(process.env.RAILWAY_PUBLIC_DOMAIN);
     if (railway) {
         return railway.startsWith("http") ? railway : `https://${railway}`;
     }
