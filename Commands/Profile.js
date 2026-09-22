@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { isOwner } = require("../Utils/staff");
+const { getJob } = require("../Utils/jobs");
 const { reply, COLOR } = require("../Utils/reply");
 
 function bar(xp, need) {
@@ -33,7 +34,12 @@ module.exports = {
         const fields = [
             {
                 name: "Деньги",
-                value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nВсего: **${user.balance + user.bank}**`,
+                value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nBTC: **${user.btc}**\nВсего: **${user.balance + user.bank}**`,
+                inline: true
+            },
+            {
+                name: "Профессия",
+                value: getJob(user.job).name,
                 inline: true
             },
             {

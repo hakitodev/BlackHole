@@ -1,7 +1,7 @@
 const { escapeHtml } = require("./access");
 const { inviteUrl } = require("./oauth");
 const { EVENT_TYPES } = require("../Utils/events");
-const { COMMANDS } = require("../Utils/commands");
+const { COMMANDS, RANGES } = require("../Utils/commands");
 const { TAGS } = require("../Utils/placeholders");
 const { toHex } = require("../Utils/color");
 
@@ -30,15 +30,19 @@ function botBrand(bot) {
     const icon = avatar
         ? `<img class="logo" src="${escapeHtml(avatar)}" alt="">`
         : `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="14" fill="#161622" stroke="#6d5cff" stroke-width="2"/>
-        <circle cx="16" cy="16" r="6" fill="#e8c547"/>
-        <circle cx="16" cy="16" r="2.5" fill="#0b0b10"/>
+        <circle cx="16" cy="16" r="14" fill="#111" stroke="#e10600" stroke-width="2"/>
+        <circle cx="16" cy="16" r="6" fill="#f5f5f5"/>
+        <circle cx="16" cy="16" r="2.5" fill="#0a0a0a"/>
       </svg>`;
     return `${icon}${escapeHtml(name)}`;
 }
 
 function navLink(href, label, active) {
     return `<a class="${active ? "active" : ""}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+}
+
+function accordion(title, inner, open) {
+    return `<details class="acc" ${open ? "open" : ""}><summary>${escapeHtml(title)}</summary>${inner}</details>`;
 }
 
 function sideNav({
@@ -59,45 +63,45 @@ function sideNav({
     bits.push(navLink("/servers", "Серверы", path === "/servers" && !guild));
 
     if (guild) {
-        bits.push(`<div class="side-heading">Сервер</div>`);
-        for (const item of GUILD_TABS) {
-            bits.push(navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id));
-        }
-        bits.push(`<div class="side-heading">Команды</div>`);
-        for (const item of COMMANDS) {
-            bits.push(navLink(
+        bits.push(accordion("Сервер", GUILD_TABS.map(item =>
+            navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
+        ).join(""), ["general", "autorole", "automod", "shop"].includes(module)));
+
+        bits.push(accordion("Команды", COMMANDS.map(item =>
+            navLink(
                 `/servers/${guild.id}/cmd/${item.id}`,
                 item.title,
                 module === "cmd" && cmdName === item.id
-            ));
-        }
-        bits.push(`<div class="side-heading">Свои</div>`);
-        bits.push(navLink(
-            `/servers/${guild.id}/custom`,
-            "+ новая",
-            module === "custom" && !customName
-        ));
-        for (const item of custom) {
-            bits.push(navLink(
+            )
+        ).join(""), module === "cmd"));
+
+        bits.push(accordion("Кастомные", [
+            navLink(`/servers/${guild.id}/custom`, "+ новая", module === "custom" && !customName),
+            ...custom.map(item => navLink(
                 `/servers/${guild.id}/custom/${item.name}`,
                 item.name,
                 module === "custom" && customName === item.name
-            ));
-        }
-        bits.push(`<div class="side-heading">Ивенты</div>`);
-        for (const item of EVENT_TYPES) {
-            bits.push(navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id));
-        }
+            ))
+        ].join(""), module === "custom"));
+
+        bits.push(accordion("Ивенты", EVENT_TYPES.map(item =>
+            navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
+        ).join(""), Boolean(EVENT_TYPES.some(item => item.id === module))));
     }
 
     if (admin) {
-        bits.push(`<div class="side-heading">Админ</div>`);
-        bits.push(navLink("/admin/users", "Юзеры", path === "/admin/users"));
-        bits.push(navLink("/admin/shop", "Всемирный шоп", path === "/admin/shop"));
+        bits.push(accordion("Админ", [
+            navLink("/admin/users", "Юзеры", path === "/admin/users"),
+            navLink("/admin/shop", "Всемирный шоп", path === "/admin/shop")
+        ].join(""), path.startsWith("/admin")));
     }
 
     bits.push(navLink("/logout", "Выйти", false));
-    return `<nav class="side">${bits.join("")}</nav>`;
+    return `
+      <aside class="side" id="panel">
+        <button class="panel-close" type="button" data-panel-close>Закрыть</button>
+        <nav>${bits.join("")}</nav>
+      </aside>`;
 }
 
 function layout({
@@ -136,14 +140,15 @@ function layout({
           ${user.avatar ? `<img src="${escapeHtml(avatar)}" alt="">` : ""}
           ${escapeHtml(user.global_name || user.username)}
         </span>
+        <button class="menu-btn" type="button" data-panel>Меню</button>
       ` : `<a class="btn discord" href="/login">Войти через Discord</a>`}
     </nav>
   </header>
   <main class="${user ? "shell" : "wrap"}">
-    ${sideNav({ user, admin, guild, module, cmdName, customName, custom, path })}
     <div class="${user ? "content" : ""}">
       ${body}
     </div>
+    ${sideNav({ user, admin, guild, module, cmdName, customName, custom, path })}
   </main>
   <script src="/editor.js"></script>
 </body>
@@ -160,7 +165,6 @@ function homePage({ user, configured, admin, bot }) {
         body: `
           <section class="hero">
             <h1>Панель бота</h1>
-            <p>Сервер, ивенты, эмбеды, шоп. Всё с сайта, без возни в чате.</p>
             <div class="row">
               ${configured
                 ? (user
@@ -190,7 +194,7 @@ function serversPage({ user, guilds, admin, bot }) {
                 : `<div class="icon-fallback">${escapeHtml((guild.name || "?")[0])}</div>`}
               <div>
                 <div>${escapeHtml(guild.name)}</div>
-                <div class="tag">${guild.bot ? "Открыть настройки" : "Бот ещё не на сервере"}</div>
+                <div class="tag">${guild.bot ? "Открыть" : "Бота нет"}</div>
               </div>
             </div>
           </a>
@@ -205,9 +209,8 @@ function serversPage({ user, guilds, admin, bot }) {
         path: "/servers",
         body: `
           <h1>Мои серверы</h1>
-          <p class="muted">Нужны права администратора или «Управление сервером».</p>
           <div class="grid" style="margin-top:20px">
-            ${cards || `<div class="card">Нет серверов, которыми ты можешь управлять.</div>`}
+            ${cards || `<div class="card">Нет серверов с правами.</div>`}
           </div>
         `
     });
@@ -226,10 +229,12 @@ function tagBar() {
     return `
       <div class="tags">
         ${TAGS.map(item =>
-            `<button type="button" class="tag-chip" data-tag="${escapeHtml(item.tag)}" title="${escapeHtml(item.hint)}">${escapeHtml(item.tag)}</button>`
+            `<button type="button" class="tag-chip" data-tag="${escapeHtml(item.tag)}">
+               <code>${escapeHtml(item.tag)}</code>
+               <span>${escapeHtml(item.hint)}</span>
+             </button>`
         ).join("")}
       </div>
-      <p class="muted">Жми тег — вставится туда, где курсор. В тексте работает маркдаун Discord: **жирный** *курс* \`код\` ~~зачёркнуто~~ ||спойлер|| [ссылка](https://)</p>
     `;
 }
 
@@ -255,7 +260,7 @@ function eventForm(type, guild, event, channels, bot) {
           <select name="channel">${channelOptions(channels, event.channel)}</select>
         </label>
         ${tagBar()}
-        <label><span>Текст. Пусто — ${escapeHtml(type.fallback)}</span>
+        <label><span>Текст</span>
           <textarea name="message">${escapeHtml(event.message || "")}</textarea>
         </label>
         ${livePreview(bot)}
@@ -325,10 +330,10 @@ function commandEditor(guild, command = {}, bot) {
           <input type="text" name="name" value="${escapeHtml(name)}" ${name ? "readonly" : ""} placeholder="hi" required>
         </label>
         ${tagBar()}
-        <label><span>Текст сообщения (над эмбедом)</span>
+        <label><span>Текст над эмбедом</span>
           <textarea name="content">${escapeHtml(command.content || "")}</textarea>
         </label>
-        <label><span>Автор эмбеда</span>
+        <label><span>Автор</span>
           <input type="text" name="author" value="${escapeHtml(command.author || "")}">
         </label>
         <label><span>Иконка автора URL</span>
@@ -403,11 +408,10 @@ function moduleForm(module, guild, settings, extras) {
                   }>
                   ${escapeHtml(role.name)}
                 </label>`).join("")
-            : `<p class="muted">Нет ролей ниже роли бота. Подними роль BlackHole выше нужных.</p>`;
+            : `<p class="muted">Нет ролей ниже роли бота.</p>`;
         return `
           <form class="stack card" method="post" action="${action}">
             <h2>Автороль</h2>
-            <p class="muted">Всё, что бот физически может выдать. Сколько надо — столько и ставь.</p>
             ${boxes}
             <button class="btn" type="submit">Сохранить</button>
           </form>`;
@@ -417,7 +421,6 @@ function moduleForm(module, guild, settings, extras) {
         return `
           <form class="stack card" method="post" action="${action}">
             <h2>Автомод</h2>
-            <p class="muted">Админов не трогает. Куда писать о срабатывании — ивент слева.</p>
             <input type="hidden" name="automodInvites" value="0">
             <label class="switch">
               <input type="checkbox" name="automodInvites" value="1" ${settings.automodInvites ? "checked" : ""}>
@@ -434,7 +437,6 @@ function moduleForm(module, guild, settings, extras) {
         return `
           <div class="stack card">
             <h2>Магаз сервера</h2>
-            <p class="muted">Только этот сервер. Всемирный — в админке слева, его тут не трогаем.</p>
             ${shopTable(shop, action, "Пока пусто.")}
             ${shopEditor(action)}
           </div>`;
@@ -463,16 +465,38 @@ function moduleForm(module, guild, settings, extras) {
       </form>`;
 }
 
-function cmdPage({ guild, name, enabled }) {
+function rangeFields(name, settings) {
+    const fields = RANGES[name];
+    if (!fields) {
+        return "";
+    }
+    const pairs = [];
+    for (let i = 0; i < fields.length; i += 2) {
+        const a = fields[i];
+        const b = fields[i + 1];
+        pairs.push(`
+          <div class="split">
+            <label><span>${escapeHtml(a.label)}</span>
+              <input type="number" name="${escapeHtml(a.key)}" min="0" value="${escapeHtml(String(settings[a.key] ?? 0))}">
+            </label>
+            ${b ? `<label><span>${escapeHtml(b.label)}</span>
+              <input type="number" name="${escapeHtml(b.key)}" min="0" value="${escapeHtml(String(settings[b.key] ?? 0))}">
+            </label>` : ""}
+          </div>`);
+    }
+    return pairs.join("");
+}
+
+function cmdPage({ guild, name, enabled, settings = {} }) {
     return `
       <form class="stack card" method="post" action="/servers/${escapeHtml(guild.id)}/cmd/${escapeHtml(name)}">
         <h2>/${escapeHtml(name)}</h2>
-        <p class="muted">Выключи — не сработает ни слэшем, ни префиксом на этом сервере.</p>
         <input type="hidden" name="enabled" value="0">
         <label class="switch">
           <input type="checkbox" name="enabled" value="1" ${enabled ? "checked" : ""}>
           Включена
         </label>
+        ${rangeFields(name, settings)}
         <button class="btn" type="submit">Сохранить</button>
       </form>`;
 }
@@ -505,6 +529,14 @@ function settingsPage(opts) {
         disabledCommands: [],
         xpOn: true,
         levelMoney: 250,
+        dailyMin: 300,
+        dailyMax: 1100,
+        workMin: 70,
+        workMax: 260,
+        crimeMin: 180,
+        crimeMax: 480,
+        crimeFineMin: 80,
+        crimeFineMax: 220,
         ...settings
     };
 
@@ -513,7 +545,8 @@ function settingsPage(opts) {
         inner = cmdPage({
             guild,
             name: cmdName,
-            enabled: !data.disabledCommands.includes(cmdName)
+            enabled: !data.disabledCommands.includes(cmdName),
+            settings: data
         });
     } else if (module === "custom") {
         inner = commandEditor(guild, editCommand || { name: customName }, bot);
@@ -547,12 +580,20 @@ function settingsPage(opts) {
     });
 }
 
+function userLabel(item) {
+    const name = item.username || "";
+    return name
+        ? `${escapeHtml(name)} <div class="muted"><code>${escapeHtml(item.id)}</code></div>`
+        : `<code>${escapeHtml(item.id)}</code>`;
+}
+
 function usersPage({ user, admin, bot, users = [], current, inventory = [], query = "", saved, error }) {
     const rows = users.map(item => `
       <tr>
-        <td><a href="/admin/users?q=${escapeHtml(item.id)}"><code>${escapeHtml(item.id)}</code></a></td>
+        <td><a href="/admin/users?q=${escapeHtml(item.id)}">${userLabel(item)}</a></td>
         <td>${escapeHtml(String(item.balance))}</td>
         <td>${escapeHtml(String(item.bank))}</td>
+        <td>${escapeHtml(String(item.btc || 0))}</td>
         <td>${escapeHtml(String(item.level))}</td>
         <td>${escapeHtml(String(item.xp))}</td>
       </tr>`).join("");
@@ -572,6 +613,10 @@ function usersPage({ user, admin, bot, users = [], current, inventory = [], quer
         </td>
       </tr>`).join("");
 
+    const heading = current
+        ? (current.username ? `${escapeHtml(current.username)}` : escapeHtml(current.id))
+        : "";
+
     return layout({
         title: "Юзеры",
         user,
@@ -580,27 +625,30 @@ function usersPage({ user, admin, bot, users = [], current, inventory = [], quer
         path: "/admin/users",
         body: `
           <h1>Юзеры</h1>
-          <p class="muted">Полный кошелёк, лвл, кд, инвентарь. Высшие модеры и овнер.</p>
           ${saved ? `<div class="flash">Сохранено.</div>` : ""}
           ${error ? `<div class="warn">${escapeHtml(error)}</div>` : ""}
           <form class="row" method="get" action="/admin/users">
-            <input type="text" name="q" value="${escapeHtml(query)}" placeholder="Discord ID">
+            <input type="text" name="q" value="${escapeHtml(query)}" placeholder="Имя или ID">
             <button class="btn" type="submit">Найти</button>
           </form>
           <div class="card" style="margin-top:20px">
             <table class="table">
-              <thead><tr><th>ID</th><th>Нал</th><th>Банк</th><th>Лвл</th><th>XP</th></tr></thead>
-              <tbody>${rows || `<tr><td colspan="5" class="muted">Никого нет.</td></tr>`}</tbody>
+              <thead><tr><th>Юзер</th><th>Нал</th><th>Банк</th><th>BTC</th><th>Лвл</th><th>XP</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="6" class="muted">Никого нет.</td></tr>`}</tbody>
             </table>
           </div>
           ${current ? `
             <form class="stack card" method="post" action="/admin/users" style="margin-top:20px">
-              <h2>${escapeHtml(current.id)}</h2>
+              <h2>${heading}</h2>
               <input type="hidden" name="op" value="save">
               <input type="hidden" name="id" value="${escapeHtml(current.id)}">
               <div class="split">
                 <label><span>Наличные</span><input type="number" name="balance" min="0" value="${escapeHtml(String(current.balance))}"></label>
                 <label><span>Банк</span><input type="number" name="bank" min="0" value="${escapeHtml(String(current.bank))}"></label>
+              </div>
+              <div class="split">
+                <label><span>BTC</span><input type="number" name="btc" min="0" value="${escapeHtml(String(current.btc || 0))}"></label>
+                <label><span>Профессия</span><input type="text" name="job" value="${escapeHtml(current.job || "")}"></label>
               </div>
               <div class="split">
                 <label><span>Уровень</span><input type="number" name="level" min="1" value="${escapeHtml(String(current.level))}"></label>
@@ -663,7 +711,6 @@ function adminShopPage({ user, admin, bot, items = [], saved, error }) {
         path: "/admin/shop",
         body: `
           <h1>Всемирный шоп</h1>
-          <p class="muted">На всех серверах. Серверный магаз его не заменяет списком — это отдельная витрина. Если id совпал, на сервере берётся серверный.</p>
           ${saved ? `<div class="flash">Сохранено.</div>` : ""}
           ${error ? `<div class="warn">${escapeHtml(error)}</div>` : ""}
           <div class="card">

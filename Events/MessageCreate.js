@@ -7,6 +7,7 @@ const { canGainXp, xpGain } = require("../Utils/xp");
 const { parseWords, hasInvite, findBannedWord, isPrivileged } = require("../Utils/automod");
 const { fireEvent } = require("../Utils/events");
 const { customPayload } = require("../Utils/customEmbed");
+const { remember } = require("../Utils/profile");
 
 async function repliedUser(message) {
     if (message.mentions.repliedUser) {
@@ -50,6 +51,8 @@ module.exports = {
         if (message.author.bot) {
             return;
         }
+
+        remember(message.author).catch(() => {});
 
         let prefix = PREFIX;
         let settings = null;

@@ -1,42 +1,27 @@
 const { SlashCommandBuilder } = require("discord.js");
-const economy = require("../Database/Economy");
-const { reply, COLOR } = require("../Utils/reply");
-
-function block(title, items) {
-    if (!items.length) {
-        return `**${title}**\nпусто`;
-    }
-    return `**${title}**\n` + items.map(item =>
-        `${item.emoji} **${item.name}** — ${item.price}\n${item.description}`
-    ).join("\n\n");
-}
+const { buildShopMessage } = require("../Utils/shopView");
+const { error } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("shop")
-        .setDescription("Магазин"),
+        .setDescription("Магазин")
+        .addStringOption(option =>
+            option
+                .setName("scope")
+                .setDescription("Витрина")
+                .addChoices(
+                    { name: "Всемирный", value: "global" },
+                    { name: "Сервер", value: "guild" }
+                )
+        ),
 
     async execute(interaction) {
-        const global = await economy.listShopItems("global");
-        const local = interaction.guildId
-            ? await economy.listShopItems(interaction.guildId)
-            : [];
-        const taken = new Set(local.map(item => item.id));
-        const world = global.filter(item => !taken.has(item.id));
-
-        if (!world.length && !local.length) {
-            return reply(interaction, {
-                color: COLOR.pink,
-                title: "Магазин",
-                description: "Пока пусто."
-            });
+        const scope = interaction.options.getString("scope") ?? "global";
+        const payload = await buildShopMessage(interaction.guildId, scope);
+        if (!payload) {
+            return error(interaction, "Пока пусто.");
         }
-
-        const text = [block("Всемирный", world), block("Сервер", local)].join("\n\n");
-        return reply(interaction, {
-            color: COLOR.pink,
-            title: "Магазин",
-            description: text.slice(0, 4000)
-        });
+        await interaction.reply(payload);
     }
 };

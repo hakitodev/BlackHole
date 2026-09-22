@@ -3,7 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { CLIENT_ID, CLIENT_SECRET } = require("../Config");
 const economy = require("../Database/Economy");
-const { canManageGuild, parseForm, escapeHtml } = require("./access");
+const { canManageGuild, parseForm, escapeHtml, assertGuildManage } = require("./access");
 const {
     createSession,
     destroySession,
@@ -25,7 +25,9 @@ const {
 const { asList } = require("../Utils/ids");
 const { isBotAdmin } = require("../Utils/staff");
 const { eventType } = require("../Utils/events");
-const { COMMANDS, canonicalName } = require("../Utils/commands");
+const { COMMANDS, canonicalName, RANGES } = require("../Utils/commands");
+const { enrichUsers, lookupDiscord } = require("../Utils/profile");
+const { syncGuildCustoms } = require("../Utils/syncCommands");
 
 const STYLE = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
 const EDITOR = fs.readFileSync(path.join(__dirname, "editor.js"), "utf8");
@@ -212,7 +214,7 @@ async function refreshSession(session) {
     }
 }
 
-async function handleAdminUsers(req, res, url, user, admin, bot, cookies) {
+async function handleAdminUsers(req, res, url, user, admin, bot, cookies, client) {
     if (req.method === "POST") {
         try {
             const form = parseForm(await readBody(req));
@@ -246,8 +248,12 @@ async function handleAdminUsers(req, res, url, user, admin, bot, cookies) {
                 balance: form.balance,
                 bank: form.bank,
                 xp: form.xp,
-                level: form.level
+                level: form.level,
+                btc: form.btc
             });
+            if (form.job !== undefined) {
+                await economy.setJob(id, form.job);
+            }
             redirect(res, `/admin/users?q=${encodeURIComponent(id)}&saved=1`, cookies);
         } catch (error) {
             console.error(error);
@@ -257,8 +263,19 @@ async function handleAdminUsers(req, res, url, user, admin, bot, cookies) {
     }
 
     const query = url.searchParams.get("q") || "";
-    const users = await economy.searchUsers(query);
-    const current = query ? await economy.getUser(query.replace(/\D/g, "") || query) : null;
+    const digits = query.replace(/\D/g, "");
+    if (digits.length >= 17 && client) {
+        await lookupDiscord(client, digits);
+    }
+    const users = await enrichUsers(client, await economy.searchUsers(query));
+    let current = null;
+    if (query) {
+        if (digits.length >= 17) {
+            current = await economy.getUser(digits);
+        } else {
+            current = users[0] ? await economy.getUser(users[0].id) : null;
+        }
+    }
     send(res, 200, usersPage({
         user,
         admin,
@@ -383,7 +400,7 @@ async function handleRequest(req, res, client) {
         }
 
         if (url.pathname === "/admin/users") {
-            await handleAdminUsers(req, res, url, user, admin, bot, cookies);
+            await handleAdminUsers(req, res, url, user, admin, bot, cookies, client);
             return;
         }
 
@@ -466,16 +483,27 @@ async function handleRequest(req, res, client) {
         const custom = await economy.listCustomCommands(guildId);
 
         if (req.method === "POST") {
+            const allowed = await assertGuildManage(guild, user.id);
+            if (!allowed) {
+                send(res, 403, errorPage({ user, admin, bot, message: "Нет прав на этот сервер." }), cookies);
+                return;
+            }
             try {
                 const form = parseForm(await readBody(req));
                 if (module === "custom") {
                     const name = form.name || customName;
                     if (form.op === "delete") {
                         await economy.deleteCustomCommand(guildId, name);
+                        if (client.commands) {
+                            await syncGuildCustoms(guild, new Set(client.commands.keys()));
+                        }
                         redirect(res, `/servers/${guildId}/custom?saved=1`, cookies);
                         return;
                     }
                     const saved = await economy.saveCustomCommand(guildId, name, customFromForm(form));
+                    if (client.commands) {
+                        await syncGuildCustoms(guild, new Set(client.commands.keys()));
+                    }
                     redirect(res, `/servers/${guildId}/custom/${saved.name || name}?saved=1`, cookies);
                     return;
                 }
@@ -487,7 +515,14 @@ async function handleRequest(req, res, client) {
                     } else {
                         disabled.add(cmdName);
                     }
-                    await economy.saveGuildSettings(guildId, { disabledCommands: [...disabled] });
+                    const patch = { disabledCommands: [...disabled] };
+                    const fields = RANGES[cmdName] || [];
+                    for (const field of fields) {
+                        if (form[field.key] !== undefined) {
+                            patch[field.key] = form[field.key];
+                        }
+                    }
+                    await economy.saveGuildSettings(guildId, patch);
                     redirect(res, `/servers/${guildId}/cmd/${cmdName}?saved=1`, cookies);
                     return;
                 }

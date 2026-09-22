@@ -113,11 +113,13 @@ test("setWallet ставит наличные и банк", async () => {
 });
 
 test("выключенные команды", () => {
-    const settings = { disabledCommands: ["flip", "help", "rob"] };
+    const settings = { disabledCommands: ["flip", "help", "rob", "crime"] };
     assert.equal(isDisabled(settings, "flip"), true);
     assert.equal(isDisabled(settings, "cf"), true);
     assert.equal(isDisabled(settings, "help"), true);
     assert.equal(isDisabled(settings, "collect"), false);
+    assert.equal(isDisabled(settings, "crime"), true);
+    assert.equal(isDisabled(settings, "daily"), false);
 });
 
 test("seed глобального шопа не пустой", async () => {

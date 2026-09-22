@@ -36,8 +36,11 @@ async function fetchRole(message, id) {
 
 function createOptions(resolved, sub) {
     return {
-        getSubcommand() {
-            return sub;
+        getSubcommand(required = true) {
+            if (!sub && required) {
+                return null;
+            }
+            return sub || null;
         },
         getUser(name) {
             return resolved[name] ?? null;

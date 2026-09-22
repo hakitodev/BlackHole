@@ -198,6 +198,24 @@ async function initDatabase(filename) {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS kv (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS businesses (
+            user_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            unclaimed INTEGER NOT NULL DEFAULT 0,
+            last_tick INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, type)
+        );
+    `);
+
     await ensureColumns();
     await ensureGuildColumns();
     await ensureStaffColumns();
@@ -221,7 +239,11 @@ async function ensureColumns() {
         daily: "INTEGER DEFAULT 0",
         work: "INTEGER DEFAULT 0",
         crime: "INTEGER DEFAULT 0",
-        rob: "INTEGER DEFAULT 0"
+        rob: "INTEGER DEFAULT 0",
+        username: "TEXT NOT NULL DEFAULT ''",
+        avatar: "TEXT NOT NULL DEFAULT ''",
+        btc: "INTEGER NOT NULL DEFAULT 0",
+        job: "TEXT NOT NULL DEFAULT ''"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -253,7 +275,15 @@ async function ensureGuildColumns() {
         automod_words: "TEXT",
         disabled_commands: "TEXT",
         xp_on: "INTEGER NOT NULL DEFAULT 1",
-        level_money: "INTEGER NOT NULL DEFAULT 250"
+        level_money: "INTEGER NOT NULL DEFAULT 250",
+        daily_min: "INTEGER NOT NULL DEFAULT 300",
+        daily_max: "INTEGER NOT NULL DEFAULT 1100",
+        work_min: "INTEGER NOT NULL DEFAULT 70",
+        work_max: "INTEGER NOT NULL DEFAULT 260",
+        crime_min: "INTEGER NOT NULL DEFAULT 180",
+        crime_max: "INTEGER NOT NULL DEFAULT 480",
+        crime_fine_min: "INTEGER NOT NULL DEFAULT 80",
+        crime_fine_max: "INTEGER NOT NULL DEFAULT 220"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -302,16 +332,17 @@ const DEFAULT_SHOP = [
     ["laptop", "Ноутбук", "💻", 8000, "Для серьёзной работы"],
     ["car", "Машина", "🚗", 35000, "Уже не пешком"],
     ["house", "Дом", "🏠", 120000, "Свой угол"],
-    ["yacht", "Яхта", "🛥️", 500000, "Если совсем некуда деньги девать"]
+    ["yacht", "Яхта", "🛥️", 500000, "Если совсем некуда деньги девать"],
+    ["box_wood", "Деревянный бокс", "📦", 400, "Случайные монеты"],
+    ["box_iron", "Железный бокс", "🧰", 2500, "Пожирнее"],
+    ["box_gold", "Золотой бокс", "🎁", 15000, "Жирный лут"]
 ];
 
 async function seedGlobalShop() {
     const row = await db.get("SELECT COUNT(*) AS n FROM shop_items WHERE scope = 'global'");
-    if (Number(row?.n) > 0) {
-        return;
-    }
+    const seed = Number(row?.n) > 0 ? DEFAULT_SHOP.filter(item => String(item[0]).startsWith("box_")) : DEFAULT_SHOP;
 
-    for (const [id, name, emoji, price, description] of DEFAULT_SHOP) {
+    for (const [id, name, emoji, price, description] of seed) {
         await db.run(
             "INSERT OR IGNORE INTO shop_items(scope, id, name, emoji, price, description) VALUES('global', ?, ?, ?, ?, ?)",
             id,
@@ -333,7 +364,11 @@ function asUser(row, id) {
         daily: Number(row?.daily) || 0,
         work: Number(row?.work) || 0,
         crime: Number(row?.crime) || 0,
-        rob: Number(row?.rob) || 0
+        rob: Number(row?.rob) || 0,
+        username: row?.username || "",
+        avatar: row?.avatar || "",
+        btc: Number(row?.btc) || 0,
+        job: row?.job || ""
     };
 }
 
@@ -1120,7 +1155,8 @@ async function setUser(id, patch = {}) {
         daily: "daily",
         work: "work",
         crime: "crime",
-        rob: "rob"
+        rob: "rob",
+        btc: "btc"
     };
     for (const [key, column] of Object.entries(map)) {
         if (patch[key] === undefined) {
@@ -1144,6 +1180,7 @@ async function resetCooldowns(id) {
 async function deleteUser(id) {
     const userId = String(id);
     await db.run("DELETE FROM inventory WHERE user_id = ?", userId);
+    await db.run("DELETE FROM businesses WHERE user_id = ?", userId);
     const result = await db.run("DELETE FROM users WHERE id = ?", userId);
     return result.changes > 0;
 }
@@ -1170,6 +1207,10 @@ async function setInventoryItem(userId, itemId, qty) {
     return true;
 }
 
+function likeQuery(query) {
+    return `%${String(query ?? "").trim().replace(/[%_]/g, "")}%`;
+}
+
 async function searchUsers(query, limit = 20) {
     const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
     const q = String(query ?? "").trim();
@@ -1179,11 +1220,45 @@ async function searchUsers(query, limit = 20) {
             safeLimit
         );
     }
+    const like = likeQuery(q);
     return db.all(
-        "SELECT * FROM users WHERE id LIKE ? ORDER BY (balance + bank) DESC LIMIT ?",
-        `%${q.replace(/[%_]/g, "")}%`,
+        `SELECT * FROM users
+         WHERE id LIKE ? OR username LIKE ?
+         ORDER BY (balance + bank) DESC
+         LIMIT ?`,
+        like,
+        like,
         safeLimit
     );
+}
+
+async function touchProfile(id, patch = {}) {
+    const userId = String(id);
+    await getUser(userId);
+    const username = String(patch.username ?? "").trim().slice(0, 64);
+    const avatar = String(patch.avatar ?? "").trim().slice(0, 128);
+    if (!username && !avatar) {
+        return getUser(userId);
+    }
+    await db.run(
+        "UPDATE users SET username = CASE WHEN ? = '' THEN username ELSE ? END, avatar = CASE WHEN ? = '' THEN avatar ELSE ? END WHERE id = ?",
+        username,
+        username,
+        avatar,
+        avatar,
+        userId
+    );
+    return getUser(userId);
+}
+
+async function setJob(id, job) {
+    await getUser(id);
+    await db.run(
+        "UPDATE users SET job = ? WHERE id = ?",
+        String(job ?? "").trim().slice(0, 32),
+        String(id)
+    );
+    return getUser(id);
 }
 
 function asCustomCommand(row) {
@@ -1232,7 +1307,15 @@ function asGuildSettings(row, id) {
             .map(name => name.trim())
             .filter(Boolean),
         xpOn: row?.xp_on == null ? true : Number(row.xp_on) !== 0,
-        levelMoney: Math.max(0, Number(row?.level_money) || 250)
+        levelMoney: Math.max(0, Number(row?.level_money) || 250),
+        dailyMin: Math.max(0, Number(row?.daily_min) || 300),
+        dailyMax: Math.max(0, Number(row?.daily_max) || 1100),
+        workMin: Math.max(0, Number(row?.work_min) || 70),
+        workMax: Math.max(0, Number(row?.work_max) || 260),
+        crimeMin: Math.max(0, Number(row?.crime_min) || 180),
+        crimeMax: Math.max(0, Number(row?.crime_max) || 480),
+        crimeFineMin: Math.max(0, Number(row?.crime_fine_min) || 80),
+        crimeFineMax: Math.max(0, Number(row?.crime_fine_max) || 220)
     };
 }
 
@@ -1270,9 +1353,48 @@ function pick(patch, current, key) {
     return patch[key] === undefined ? current[key] : patch[key];
 }
 
+function clampPair(min, max, fallbackMin, fallbackMax) {
+    let low = Math.max(0, Math.min(1e9, Math.floor(Number(min))));
+    let high = Math.max(0, Math.min(1e9, Math.floor(Number(max))));
+    if (!Number.isFinite(low)) {
+        low = fallbackMin;
+    }
+    if (!Number.isFinite(high)) {
+        high = fallbackMax;
+    }
+    if (high < low) {
+        high = low;
+    }
+    return [low, high];
+}
+
 async function saveGuildSettings(guildId, patch) {
     const id = String(guildId);
     const current = await getGuildSettings(id);
+    const [dailyMin, dailyMax] = clampPair(
+        pick(patch, current, "dailyMin"),
+        pick(patch, current, "dailyMax"),
+        300,
+        1100
+    );
+    const [workMin, workMax] = clampPair(
+        pick(patch, current, "workMin"),
+        pick(patch, current, "workMax"),
+        70,
+        260
+    );
+    const [crimeMin, crimeMax] = clampPair(
+        pick(patch, current, "crimeMin"),
+        pick(patch, current, "crimeMax"),
+        180,
+        480
+    );
+    const [crimeFineMin, crimeFineMax] = clampPair(
+        pick(patch, current, "crimeFineMin"),
+        pick(patch, current, "crimeFineMax"),
+        80,
+        220
+    );
     const next = {
         prefix: pick(patch, current, "prefix") ? 1 : 0,
         prefixText: String(pick(patch, current, "prefixText") ?? PREFIX).trim().slice(0, 8) || PREFIX,
@@ -1297,7 +1419,15 @@ async function saveGuildSettings(guildId, patch) {
                 .map(name => name.trim())
                 .filter(Boolean),
         xpOn: pick(patch, current, "xpOn") ? 1 : 0,
-        levelMoney: Math.max(0, Math.min(1e12, Number(pick(patch, current, "levelMoney")) || 0))
+        levelMoney: Math.max(0, Math.min(1e12, Number(pick(patch, current, "levelMoney")) || 0)),
+        dailyMin,
+        dailyMax,
+        workMin,
+        workMax,
+        crimeMin,
+        crimeMax,
+        crimeFineMin,
+        crimeFineMax
     };
 
     await db.run(
@@ -1305,8 +1435,9 @@ async function saveGuildSettings(guildId, patch) {
             id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message,
             autorole_ids, log_channel, log_joins, log_messages, log_mod,
             levels_on, levels_channel, levels_message, automod_invites, automod_words,
-            disabled_commands, xp_on, level_money
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            disabled_commands, xp_on, level_money,
+            daily_min, daily_max, work_min, work_max, crime_min, crime_max, crime_fine_min, crime_fine_max
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
@@ -1326,7 +1457,15 @@ async function saveGuildSettings(guildId, patch) {
             automod_words = excluded.automod_words,
             disabled_commands = excluded.disabled_commands,
             xp_on = excluded.xp_on,
-            level_money = excluded.level_money`,
+            level_money = excluded.level_money,
+            daily_min = excluded.daily_min,
+            daily_max = excluded.daily_max,
+            work_min = excluded.work_min,
+            work_max = excluded.work_max,
+            crime_min = excluded.crime_min,
+            crime_max = excluded.crime_max,
+            crime_fine_min = excluded.crime_fine_min,
+            crime_fine_max = excluded.crime_fine_max`,
         id,
         next.prefix,
         next.prefixText,
@@ -1346,7 +1485,15 @@ async function saveGuildSettings(guildId, patch) {
         next.automodWords,
         next.disabledCommands.join(","),
         next.xpOn,
-        next.levelMoney
+        next.levelMoney,
+        next.dailyMin,
+        next.dailyMax,
+        next.workMin,
+        next.workMax,
+        next.crimeMin,
+        next.crimeMax,
+        next.crimeFineMin,
+        next.crimeFineMax
     );
 
     return getGuildSettings(id);
@@ -1449,6 +1596,322 @@ async function setPrefixEnabled(guildId, enabled) {
     await saveGuildSettings(guildId, { ...current, prefix: enabled });
 }
 
+async function getKv(key) {
+    const row = await db.get("SELECT value FROM kv WHERE key = ?", String(key));
+    return row ? row.value : null;
+}
+
+async function setKv(key, value) {
+    await db.run(
+        `INSERT INTO kv(key, value) VALUES(?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        String(key),
+        String(value)
+    );
+}
+
+const BTC_MIN = 8000;
+const BTC_MAX = 140000;
+const BTC_BASE = 42000;
+
+async function btcPrice(now = Date.now()) {
+    return withTransaction(async () => {
+        const raw = await db.get("SELECT value FROM kv WHERE key = ?", "btc_price");
+        const tick = await db.get("SELECT value FROM kv WHERE key = ?", "btc_tick");
+        let price = Math.max(BTC_MIN, Math.min(BTC_MAX, Number(raw?.value) || BTC_BASE));
+        const last = Number(tick?.value) || 0;
+        if (now - last >= 60 * 1000) {
+            const drift = Math.floor((Math.random() - 0.47) * 1800);
+            price = Math.max(BTC_MIN, Math.min(BTC_MAX, price + drift));
+            await db.run(
+                `INSERT INTO kv(key, value) VALUES('btc_price', ?)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+                String(price)
+            );
+            await db.run(
+                `INSERT INTO kv(key, value) VALUES('btc_tick', ?)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+                String(now)
+            );
+        }
+        return price;
+    });
+}
+
+async function buyBtc(id, coins) {
+    const qty = Math.max(0, Math.floor(Number(coins) || 0));
+    if (qty < 1) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(id);
+
+    return withTransaction(async () => {
+        const raw = await db.get("SELECT value FROM kv WHERE key = ?", "btc_price");
+        const price = Math.max(BTC_MIN, Math.min(BTC_MAX, Number(raw?.value) || BTC_BASE));
+        const cost = price * qty;
+        const spent = await db.run(
+            "UPDATE users SET balance = balance - ?, btc = btc + ? WHERE id = ? AND balance >= ?",
+            cost,
+            qty,
+            String(id),
+            cost
+        );
+        if (!spent.changes) {
+            return { ok: false, reason: "insufficient", price, cost };
+        }
+        return { ok: true, coins: qty, price, cost };
+    });
+}
+
+async function sellBtc(id, coins) {
+    const qty = Math.max(0, Math.floor(Number(coins) || 0));
+    if (qty < 1) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(id);
+
+    return withTransaction(async () => {
+        const raw = await db.get("SELECT value FROM kv WHERE key = ?", "btc_price");
+        const price = Math.max(BTC_MIN, Math.min(BTC_MAX, Number(raw?.value) || BTC_BASE));
+        const payout = price * qty;
+        const sold = await db.run(
+            "UPDATE users SET btc = btc - ?, balance = balance + ? WHERE id = ? AND btc >= ?",
+            qty,
+            payout,
+            String(id),
+            qty
+        );
+        if (!sold.changes) {
+            return { ok: false, reason: "insufficient", price };
+        }
+        return { ok: true, coins: qty, price, payout };
+    });
+}
+
+function asBusiness(row) {
+    if (!row) {
+        return null;
+    }
+    return {
+        userId: row.user_id,
+        type: row.type,
+        level: Math.max(1, Number(row.level) || 1),
+        unclaimed: Math.max(0, Number(row.unclaimed) || 0),
+        lastTick: Number(row.last_tick) || 0
+    };
+}
+
+function businessYield(def, level, elapsedMs) {
+    const minutes = Math.max(0, elapsedMs) / 60000;
+    const rate = def.income * (1 + 0.25 * (Math.max(1, level) - 1));
+    return Math.floor(rate * minutes);
+}
+
+function settleBusiness(row, def, now) {
+    const biz = asBusiness(row);
+    const gained = businessYield(def, biz.level, now - biz.lastTick);
+    const cap = def.cap * biz.level;
+    return {
+        ...biz,
+        unclaimed: Math.min(cap, biz.unclaimed + gained),
+        lastTick: now
+    };
+}
+
+async function getBusiness(userId, type) {
+    const row = await db.get(
+        "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
+        String(userId),
+        String(type)
+    );
+    return asBusiness(row);
+}
+
+async function listBusinesses(userId) {
+    const rows = await db.all(
+        "SELECT * FROM businesses WHERE user_id = ? ORDER BY type",
+        String(userId)
+    );
+    return rows.map(asBusiness);
+}
+
+async function buyBusiness(userId, type, def) {
+    await getUser(userId);
+    return withTransaction(async () => {
+        const exists = await db.get(
+            "SELECT type FROM businesses WHERE user_id = ? AND type = ?",
+            String(userId),
+            type
+        );
+        if (exists) {
+            return { ok: false, reason: "owned" };
+        }
+        const spent = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            def.price,
+            String(userId),
+            def.price
+        );
+        if (!spent.changes) {
+            return { ok: false, reason: "insufficient" };
+        }
+        await db.run(
+            "INSERT INTO businesses(user_id, type, level, unclaimed, last_tick) VALUES(?, ?, 1, 0, ?)",
+            String(userId),
+            type,
+            Date.now()
+        );
+        return { ok: true };
+    });
+}
+
+async function upgradeBusiness(userId, type, def) {
+    await getUser(userId);
+    return withTransaction(async () => {
+        const row = await db.get(
+            "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
+            String(userId),
+            type
+        );
+        if (!row) {
+            return { ok: false, reason: "missing" };
+        }
+        const level = Math.max(1, Number(row.level) || 1);
+        if (level >= def.maxLevel) {
+            return { ok: false, reason: "max", level };
+        }
+        const cost = Math.floor(def.price * level * 1.6);
+        const spent = await db.run(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+            cost,
+            String(userId),
+            cost
+        );
+        if (!spent.changes) {
+            return { ok: false, reason: "insufficient", cost };
+        }
+        await db.run(
+            "UPDATE businesses SET level = level + 1 WHERE user_id = ? AND type = ?",
+            String(userId),
+            type
+        );
+        return { ok: true, level: level + 1, cost };
+    });
+}
+
+async function collectBusiness(userId, type, def) {
+    await getUser(userId);
+    const now = Date.now();
+    return withTransaction(async () => {
+        const row = await db.get(
+            "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
+            String(userId),
+            type
+        );
+        if (!row) {
+            return { ok: false, reason: "missing" };
+        }
+        const settled = settleBusiness(row, def, now);
+        const amount = settled.unclaimed;
+        if (amount < 1) {
+            await db.run(
+                "UPDATE businesses SET unclaimed = 0, last_tick = ? WHERE user_id = ? AND type = ?",
+                now,
+                String(userId),
+                type
+            );
+            return { ok: false, reason: "empty" };
+        }
+        await db.run(
+            "UPDATE businesses SET unclaimed = 0, last_tick = ? WHERE user_id = ? AND type = ?",
+            now,
+            String(userId),
+            type
+        );
+        await db.run(
+            "UPDATE users SET balance = balance + ? WHERE id = ?",
+            amount,
+            String(userId)
+        );
+        return { ok: true, amount, level: settled.level };
+    });
+}
+
+async function peekBusiness(userId, type, def, now = Date.now()) {
+    const row = await db.get(
+        "SELECT * FROM businesses WHERE user_id = ? AND type = ?",
+        String(userId),
+        type
+    );
+    if (!row) {
+        return null;
+    }
+    return settleBusiness(row, def, now);
+}
+
+async function consumeItem(id, itemId, qty = 1) {
+    const userId = String(id);
+    const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+    const n = Math.max(1, Math.floor(Number(qty) || 1));
+    if (!item) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(userId);
+
+    return withTransaction(async () => {
+        const taken = await db.run(
+            "UPDATE inventory SET qty = qty - ? WHERE user_id = ? AND item_id = ? AND qty >= ?",
+            n,
+            userId,
+            item,
+            n
+        );
+        if (!taken.changes) {
+            return { ok: false, reason: "missing" };
+        }
+        await db.run(
+            "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
+            userId,
+            item
+        );
+        return { ok: true };
+    });
+}
+
+async function openBox(id, itemId, payout) {
+    const userId = String(id);
+    const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+    const amount = Math.max(0, Math.floor(Number(payout) || 0));
+    if (!item) {
+        return { ok: false, reason: "invalid" };
+    }
+    await getUser(userId);
+
+    return withTransaction(async () => {
+        const taken = await db.run(
+            "UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item_id = ? AND qty >= 1",
+            userId,
+            item
+        );
+        if (!taken.changes) {
+            return { ok: false, reason: "missing" };
+        }
+        await db.run(
+            "DELETE FROM inventory WHERE user_id = ? AND item_id = ? AND qty <= 0",
+            userId,
+            item
+        );
+        if (amount > 0) {
+            await db.run(
+                "UPDATE users SET balance = balance + ? WHERE id = ?",
+                amount,
+                userId
+            );
+        }
+        return { ok: true, amount };
+    });
+}
+
 module.exports = {
     initDatabase,
     closeDatabase,
@@ -1497,6 +1960,8 @@ module.exports = {
     deleteUser,
     setInventoryItem,
     searchUsers,
+    touchProfile,
+    setJob,
     isPrefixEnabled,
     setPrefixEnabled,
     getGuildSettings,
@@ -1505,5 +1970,18 @@ module.exports = {
     getCustomCommand,
     saveCustomCommand,
     deleteCustomCommand,
-    neededXp
+    neededXp,
+    getKv,
+    setKv,
+    btcPrice,
+    buyBtc,
+    sellBtc,
+    getBusiness,
+    listBusinesses,
+    buyBusiness,
+    upgradeBusiness,
+    collectBusiness,
+    peekBusiness,
+    consumeItem,
+    openBox
 };

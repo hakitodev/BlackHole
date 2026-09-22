@@ -6,6 +6,8 @@ const path = require("path");
 const economy = require("./Database/Economy");
 const { payload } = require("./Utils/reply");
 const { runCommand, resolveCommand } = require("./Utils/runCommand");
+const { customPayload } = require("./Utils/customEmbed");
+const { remember } = require("./Utils/profile");
 
 const client = new Client({
     intents: [
@@ -13,6 +15,9 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildInvites,
+        GatewayIntentBits.GuildEmojisAndStickers,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent
     ],
@@ -29,10 +34,7 @@ client.commandAliases = new Map([
     ["coinflip", "flip"],
     ["cf", "flip"],
     ["ball", "8ball"],
-    ["eightball", "8ball"],
-    ["daily", "collect"],
-    ["work", "collect"],
-    ["crime", "collect"]
+    ["eightball", "8ball"]
 ]);
 
 function load(folder, callback) {
@@ -80,6 +82,8 @@ load("Events", event => {
 });
 
 client.on("interactionCreate", async interaction => {
+    remember(interaction.user).catch(() => {});
+
     if (interaction.isAutocomplete()) {
         try {
             const command = resolveCommand(client, interaction.commandName);
@@ -94,16 +98,30 @@ client.on("interactionCreate", async interaction => {
     if (interaction.isChatInputCommand()) {
         const command = resolveCommand(client, interaction.commandName);
 
-        if (!command) {
-            await interaction.reply(payload({
-                description: "Команда устарела. Напиши `/` заново.",
-                color: 0xED4245,
-                ephemeral: true
-            }));
+        if (command) {
+            await runCommand(command, interaction);
             return;
         }
 
-        await runCommand(command, interaction);
+        if (interaction.guild) {
+            const custom = await economy.getCustomCommand(interaction.guild.id, interaction.commandName);
+            if (custom) {
+                const body = customPayload(custom, {
+                    user: interaction.user,
+                    guild: interaction.guild
+                });
+                if (body.content || body.embeds) {
+                    await interaction.reply(body).catch(() => {});
+                    return;
+                }
+            }
+        }
+
+        await interaction.reply(payload({
+            description: "Команда устарела. Напиши `/` заново.",
+            color: 0xED4245,
+            ephemeral: true
+        }));
         return;
     }
 
@@ -164,4 +182,3 @@ module.exports = {
     client,
     startBot
 };
-

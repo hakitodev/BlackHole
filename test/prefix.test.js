@@ -116,10 +116,14 @@ test("parseOptionValues: 8ball забирает весь хвост", () => {
     assert.equal(parsed.values.question.value, "я выиграю ?");
 });
 
-test("parseOptionValues: без цели и без ответа", () => {
-    const parsed = parseOptionValues([], {
-        options: [{ type: 6, name: "user", required: true }]
+test("parseOptionValues: collect subcommand", () => {
+    const parsed = parseOptionValues(["daily"], {
+        options: [
+            { type: 1, name: "daily" },
+            { type: 1, name: "work" },
+            { type: 1, name: "crime" }
+        ]
     }, null);
 
-    assert.equal(parsed.values.user, null);
+    assert.equal(parsed.sub, "daily");
 });

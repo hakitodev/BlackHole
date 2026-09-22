@@ -97,7 +97,8 @@ function forgetMemory() {
 }
 
 function cookieFlags() {
-    const secure = String(process.env.PUBLIC_URL || "").startsWith("https://")
+    const url = String(process.env.PUBLIC_URL || "");
+    const secure = url.startsWith("https://") || process.env.RENDER
         ? "; Secure"
         : "";
     return `Path=/; HttpOnly; SameSite=Lax${secure}`;

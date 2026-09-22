@@ -25,6 +25,7 @@ module.exports = {
             description:
                 `Наличные: **${user.balance}**\n` +
                 `Банк: **${user.bank}**\n` +
+                `BTC: **${user.btc}**\n` +
                 `Всего: **${user.balance + user.bank}**`
         });
     }

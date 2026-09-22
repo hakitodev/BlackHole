@@ -24,44 +24,58 @@ after(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("collect: забирает daily, work и crime разом", async () => {
+test("collect daily выдаёт отдельно", async () => {
     const id = uid();
-    const result = await runCollect(id, () => 0);
+    const result = await runCollect(id, "daily");
 
     assert.equal(result.claimed, true);
+    assert.equal(result.parts[0].id, "daily");
     assert.equal(result.parts[0].ok, true);
     assert.ok(result.parts[0].amount >= 300);
     assert.ok(result.parts[0].amount <= 1100);
-    assert.equal(result.parts[1].ok, true);
-    assert.equal(result.parts[2].ok, true);
-    assert.equal(result.parts[2].success, true);
-
-    const expected = result.parts
-        .filter(part => part.ok && part.amount && (part.id !== "crime" || part.success))
-        .reduce((sum, part) => sum + part.amount, 0);
-
-    assert.equal(result.balance, expected);
+    assert.equal(result.balance, result.parts[0].amount);
     assert.match(formatCollect(result), /Ежедневка/);
 });
 
-test("collect: повторно не выдаёт, пока кулдаун", async () => {
+test("collect work и crime отдельно, диапазон с гильдии", async () => {
     const id = uid();
-    await runCollect(id, () => 0);
-    const again = await runCollect(id, () => 0);
+    await economy.saveGuildSettings("g-col", {
+        workMin: 10,
+        workMax: 10,
+        crimeMin: 50,
+        crimeMax: 50,
+        crimeFineMin: 1,
+        crimeFineMax: 1
+    });
+    const settings = await economy.getGuildSettings("g-col");
+    const work = await runCollect(id, "work", { settings });
+    assert.equal(work.parts[0].ok, true);
+    assert.equal(work.parts[0].amount, 10);
+
+    const crime = await runCollect(id, "crime", { settings, random: () => 0 });
+    assert.equal(crime.parts[0].ok, true);
+    assert.equal(crime.parts[0].success, true);
+    assert.equal(crime.parts[0].amount, 50);
+});
+
+test("collect daily повторно не выдаёт, пока кулдаун", async () => {
+    const id = uid();
+    await runCollect(id, "daily");
+    const again = await runCollect(id, "daily");
 
     assert.equal(again.claimed, false);
-    assert.equal(again.parts.every(part => !part.ok), true);
+    assert.equal(again.parts[0].ok, false);
     assert.match(formatCollect(again), /через/);
 });
 
-test("collect: провал crime не отменяет daily и work", async () => {
+test("collect crime провал не трогает daily", async () => {
     const id = uid();
-    const result = await runCollect(id, () => 0.99);
+    const daily = await runCollect(id, "daily");
+    const crime = await runCollect(id, "crime", { random: () => 0.99 });
 
-    assert.equal(result.parts[0].ok, true);
-    assert.equal(result.parts[1].ok, true);
-    assert.equal(result.parts[2].ok, true);
-    assert.equal(result.parts[2].success, false);
-    assert.ok(result.balance >= 0);
-    assert.ok(result.balance < result.parts[0].amount + result.parts[1].amount + 1);
+    assert.equal(daily.parts[0].ok, true);
+    assert.equal(crime.parts[0].ok, true);
+    assert.equal(crime.parts[0].success, false);
+    const user = await economy.getUser(id);
+    assert.ok(user.balance <= daily.parts[0].amount);
 });

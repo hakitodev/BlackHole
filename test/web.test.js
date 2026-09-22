@@ -60,6 +60,13 @@ function fakeClient(guildId = GUILD_ID) {
     const guild = {
         id: guildId,
         name: `Сервер <script>`,
+        ownerId: "1",
+        members: {
+            cache: new Map([["1", {
+                id: "1",
+                permissions: { has: () => true }
+            }]])
+        },
         channels: { cache: channels }
     };
     return {
@@ -149,8 +156,8 @@ test("GET /servers показывает серверы, где есть прав
     }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /Мои серверы/);
-    assert.match(res.body, /Открыть настройки/);
-    assert.match(res.body, /Бот ещё не на сервере/);
+    assert.match(res.body, /Открыть/);
+    assert.match(res.body, /Бота нет/);
     assert.match(res.body, /Без бота/);
     assert.doesNotMatch(res.body, /Чужой/);
 });
@@ -397,4 +404,66 @@ test("сессия живёт после очистки памяти — как 
     const restored = await getSession(id);
     assert.equal(restored.user.username, "stay");
     assert.equal(restored.id, id);
+});
+
+test("POST без прав в кэше бота — 403", async () => {
+    const guildId = "555666777888999000";
+    const cookie = await sessionCookie({
+        guilds: [{ id: guildId, name: "Weak", owner: false, permissions: "32" }]
+    });
+    const client = fakeClient(guildId);
+    const guild = client.guilds.cache.get(guildId);
+    guild.ownerId = "999";
+    guild.members.cache.clear();
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${guildId}/general`,
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "prefix=1&prefixText=%21"
+    }), res, client);
+    assert.equal(res.statusCode, 403);
+});
+
+test("POST /cmd/daily пишет диапазон", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/cmd/daily`,
+        headers: {
+            cookie: await sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "enabled=1&dailyMin=10&dailyMax=20"
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 302);
+    const settings = await economy.getGuildSettings(GUILD_ID);
+    assert.equal(settings.dailyMin, 10);
+    assert.equal(settings.dailyMax, 20);
+    assert.equal(settings.disabledCommands.includes("daily"), false);
+});
+
+test("GET timeout ивент есть", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: `/servers/${GUILD_ID}/timeout`,
+        headers: { cookie: await sessionCookie() }
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /Таймаут/);
+});
+
+test("панель справа и теги с пояснением", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: `/servers/${GUILD_ID}/custom`,
+        headers: { cookie: await sessionCookie() }
+    }), res, fakeClient());
+    assert.match(res.body, /class="side"/);
+    assert.match(res.body, /Кастомные/);
+    assert.match(res.body, /Пинг человека/);
+    assert.match(res.body, /data-panel/);
 });

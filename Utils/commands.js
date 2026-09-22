@@ -1,11 +1,18 @@
 const COMMANDS = [
     { id: "collect", title: "collect" },
-    { id: "bal", title: "bal" },
+    { id: "daily", title: "daily" },
+    { id: "work", title: "work" },
+    { id: "crime", title: "crime" },
     { id: "rob", title: "rob" },
     { id: "pay", title: "pay" },
     { id: "flip", title: "flip" },
     { id: "dep", title: "dep" },
     { id: "with", title: "with" },
+    { id: "btc", title: "btc" },
+    { id: "box", title: "box" },
+    { id: "biz", title: "biz" },
+    { id: "job", title: "job" },
+    { id: "bal", title: "bal" },
     { id: "top", title: "top" },
     { id: "profile", title: "profile" },
     { id: "rank", title: "rank" },
@@ -39,13 +46,32 @@ const ALIASES = {
     cf: "flip",
     ball: "8ball",
     eightball: "8ball",
-    daily: "collect",
-    work: "collect",
-    crime: "collect",
     steal: "rob",
     config: "settings",
     commands: "help",
-    cmds: "help"
+    cmds: "help",
+    bitcoin: "btc",
+    case: "box",
+    lootbox: "box",
+    business: "biz",
+    col: "collect"
+};
+
+const RANGES = {
+    daily: [
+        { key: "dailyMin", label: "Мин" },
+        { key: "dailyMax", label: "Макс" }
+    ],
+    work: [
+        { key: "workMin", label: "Мин" },
+        { key: "workMax", label: "Макс" }
+    ],
+    crime: [
+        { key: "crimeMin", label: "Мин" },
+        { key: "crimeMax", label: "Макс" },
+        { key: "crimeFineMin", label: "Штраф мин" },
+        { key: "crimeFineMax", label: "Штраф макс" }
+    ]
 };
 
 function canonicalName(name) {
@@ -62,6 +88,8 @@ function isDisabled(settings, name) {
 module.exports = {
     COMMANDS,
     RESTRICTABLE: COMMANDS,
+    RANGES,
+    ALIASES,
     canonicalName,
     isDisabled
 };

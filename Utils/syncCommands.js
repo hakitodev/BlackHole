@@ -1,31 +1,47 @@
+const economy = require("../Database/Economy");
+
 function commandPayloads(commandMap) {
     return [...commandMap.values()].map(command => command.data.toJSON());
 }
 
-async function clearGuildCommands(client) {
-    const guilds = [...client.guilds.cache.values()];
+function customSlash(command) {
+    return {
+        name: command.name,
+        description: (command.title || "Кастом").slice(0, 100) || "Кастом",
+        type: 1
+    };
+}
 
-    for (const guild of guilds) {
-        try {
-            await guild.commands.set([]);
-            console.log(`Серверные команды очищены: ${guild.name}`);
-        } catch (error) {
-            console.error(`Не удалось очистить команды ${guild.id}:`, error);
-        }
+async function syncGuildCustoms(guild, builtins) {
+    const names = builtins instanceof Set ? builtins : new Set(builtins || []);
+    const list = await economy.listCustomCommands(guild.id);
+    const payload = list
+        .filter(item => item.name && !names.has(item.name))
+        .map(customSlash)
+        .slice(0, 100);
+
+    try {
+        await guild.commands.set(payload);
+        console.log(`Серверные команды ${guild.name}: ${payload.map(item => item.name).join(", ") || "нет"}`);
+    } catch (error) {
+        console.error(`Не удалось поставить команды ${guild.id}:`, error);
     }
 }
 
 async function syncCommands(client) {
     const payload = commandPayloads(client.commands);
+    const builtins = new Set(payload.map(item => item.name));
 
     await client.application.commands.set(payload);
     console.log(`Глобальные команды: ${payload.map(command => command.name).join(", ")}`);
 
-    await clearGuildCommands(client);
+    for (const guild of client.guilds.cache.values()) {
+        await syncGuildCustoms(guild, builtins);
+    }
 }
 
 module.exports = {
     commandPayloads,
-    clearGuildCommands,
+    syncGuildCustoms,
     syncCommands
 };

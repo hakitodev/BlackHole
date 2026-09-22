@@ -14,6 +14,64 @@ function canManageGuild(permissions, owner = false) {
     }
 }
 
+function flagsHas(perms, flag) {
+    try {
+        return Boolean(perms.has(flag));
+    } catch {
+        return false;
+    }
+}
+
+function memberCanManage(guild, userId) {
+    if (!guild || !userId) {
+        return false;
+    }
+
+    if (guild.ownerId && String(guild.ownerId) === String(userId)) {
+        return true;
+    }
+
+    const member = guild.members?.cache?.get(String(userId));
+    if (!member) {
+        return false;
+    }
+
+    const perms = member.permissions;
+    if (perms && typeof perms.has === "function") {
+        return flagsHas(perms, "Administrator")
+            || flagsHas(perms, "ManageGuild")
+            || flagsHas(perms, 8n)
+            || flagsHas(perms, 32n);
+    }
+
+    return canManageGuild(perms?.bitfield ?? perms ?? 0, false);
+}
+
+async function assertGuildManage(guild, userId) {
+    if (memberCanManage(guild, userId)) {
+        return true;
+    }
+
+    if (guild?.members?.fetch) {
+        const member = await guild.members.fetch(String(userId)).catch(() => null);
+        if (member && memberCanManage({ ...guild, members: { cache: new Map([[String(userId), member]]) }, ownerId: guild.ownerId }, userId)) {
+            return true;
+        }
+        if (member) {
+            const perms = member.permissions;
+            if (perms && typeof perms.has === "function") {
+                return flagsHas(perms, "Administrator")
+                    || flagsHas(perms, "ManageGuild")
+                    || flagsHas(perms, 8n)
+                    || flagsHas(perms, 32n);
+            }
+            return canManageGuild(perms?.bitfield ?? perms ?? 0, false);
+        }
+    }
+
+    return false;
+}
+
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({
         "&": "&amp;",
@@ -41,6 +99,8 @@ module.exports = {
     ADMIN,
     MANAGE_GUILD,
     canManageGuild,
+    memberCanManage,
+    assertGuildManage,
     escapeHtml,
     parseForm
 };

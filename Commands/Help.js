@@ -19,11 +19,11 @@ module.exports = {
         const fields = [
             {
                 name: "Экономика",
-                value: "`/collect` `/bal` `/rob` `/pay` `/flip` `/dep` `/with` `/top` `/profile`"
+                value: "`/collect daily|work|crime` `/bal` `/rob` `/pay` `/flip` `/dep` `/with` `/btc` `/biz` `/job` `/top` `/profile`"
             },
             {
                 name: "Магазин",
-                value: "`/shop` `/buy` `/inv`"
+                value: "`/shop` `/buy` `/inv` `/box`"
             },
             {
                 name: "Сервер",
@@ -42,7 +42,7 @@ module.exports = {
         if (prefixOn) {
             fields.push({
                 name: "Префикс",
-                value: `\`${prefix}collect\` \`${prefix}pay all\``
+                value: `\`${prefix}collect daily\` \`${prefix}pay all\``
             });
         }
 
@@ -52,11 +52,6 @@ module.exports = {
                 value: PUBLIC_URL
             });
         }
-
-        fields.push({
-            name: "Панель",
-            value: "Сайт: ивенты, эмбеды, магаз. Высшие модеры — юзеры и всемирный шоп."
-        });
 
         return reply(interaction, {
             color: COLOR.blurple,
