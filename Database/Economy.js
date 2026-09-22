@@ -1,26 +1,61 @@
+const fs = require("fs");
 const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
 const path = require("path");
 
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
+const ROOT = path.join(__dirname, "..");
+const DATA_PATH = path.join(ROOT, "data", "economy.sqlite");
+const LEGACY_PATH = path.join(__dirname, "database.sqlite");
 
 let db;
 let txQueue = Promise.resolve();
+let activePath = null;
 
 function neededXp(level) {
     return 100 * Math.max(1, level);
 }
 
+function copySidecars(from, to) {
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+        const source = from + suffix;
+        if (fs.existsSync(source) && !fs.existsSync(to + suffix)) {
+            fs.copyFileSync(source, to + suffix);
+        }
+    }
+}
+
+function migrateLegacy(legacyPath, dataPath) {
+    try {
+        fs.mkdirSync(path.dirname(dataPath), { recursive: true });
+        fs.copyFileSync(legacyPath, dataPath);
+        copySidecars(legacyPath, dataPath);
+        console.log(`База перенесена в ${dataPath}`);
+        return dataPath;
+    } catch (error) {
+        console.warn("Не удалось перенести базу, оставляю старый путь:", error.message);
+        return legacyPath;
+    }
+}
+
 function resolveDatabasePath(filename) {
     if (filename) {
-        return filename;
+        return path.resolve(filename);
     }
 
     if (process.env.DATABASE_PATH) {
-        return process.env.DATABASE_PATH;
+        return path.resolve(process.env.DATABASE_PATH);
     }
 
-    return path.join(__dirname, "database.sqlite");
+    if (fs.existsSync(DATA_PATH)) {
+        return DATA_PATH;
+    }
+
+    if (fs.existsSync(LEGACY_PATH)) {
+        return migrateLegacy(LEGACY_PATH, DATA_PATH);
+    }
+
+    return DATA_PATH;
 }
 
 function enqueue(work) {
@@ -43,19 +78,32 @@ async function withTransaction(work) {
     });
 }
 
+async function checkpoint() {
+    if (!db) {
+        return;
+    }
+
+    await db.exec("PRAGMA wal_checkpoint(TRUNCATE);").catch(() => {});
+}
+
 async function initDatabase(filename) {
     if (db) {
+        await checkpoint();
         await db.close();
         db = null;
     }
 
+    activePath = resolveDatabasePath(filename);
+    fs.mkdirSync(path.dirname(activePath), { recursive: true });
+
     db = await open({
-        filename: resolveDatabasePath(filename),
+        filename: activePath,
         driver: sqlite3.Database
     });
 
     await db.exec("PRAGMA busy_timeout = 5000;");
     await db.exec("PRAGMA foreign_keys = ON;");
+    await db.exec("PRAGMA synchronous = NORMAL;");
 
     try {
         await db.exec("PRAGMA journal_mode = WAL;");
@@ -103,6 +151,11 @@ async function initDatabase(filename) {
     `);
 
     await ensureColumns();
+    await checkpoint();
+
+    if (!filename) {
+        console.log(`Экономика: ${activePath}`);
+    }
 }
 
 async function ensureColumns() {
@@ -142,8 +195,10 @@ function asUser(row, id) {
 
 async function closeDatabase() {
     if (db) {
+        await checkpoint();
         await db.close();
         db = null;
+        activePath = null;
     }
 }
 
@@ -625,6 +680,7 @@ async function setPrefixEnabled(guildId, enabled) {
 module.exports = {
     initDatabase,
     closeDatabase,
+    resolveDatabasePath,
     getUser,
     addBalance,
     removeBalance,
