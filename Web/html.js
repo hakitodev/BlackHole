@@ -120,7 +120,7 @@ function settingsPage({ user, guild, settings, channels, saved }) {
                 <input type="checkbox" name="prefix" value="1" ${settings.prefix ? "checked" : ""}>
                 Префикс-команды
               </label>
-              <label>Префикс
+              <label><span>Префикс</span>
                 <input type="text" name="prefixText" maxlength="8" value="${escapeHtml(settings.prefixText)}">
               </label>
             </div>
@@ -130,13 +130,13 @@ function settingsPage({ user, guild, settings, channels, saved }) {
                 <input type="checkbox" name="welcomeOn" value="1" ${settings.welcomeOn ? "checked" : ""}>
                 Писать вход и выход
               </label>
-              <label>Канал
+              <label><span>Канал</span>
                 <select name="welcomeChannel">${options}</select>
               </label>
-              <label>Вход. <code>{user}</code> — упоминание
+              <label><span>Вход. <code>{user}</code> — упоминание</span>
                 <textarea name="welcomeMessage">${escapeHtml(settings.welcomeMessage)}</textarea>
               </label>
-              <label>Выход
+              <label><span>Выход</span>
                 <textarea name="leaveMessage">${escapeHtml(settings.leaveMessage)}</textarea>
               </label>
             </div>
