@@ -1,6 +1,4 @@
-const { EmbedBuilder } = require("discord.js");
-const economy = require("../Database/Economy");
-const { guildLog } = require("../Utils/log");
+const { fireEvent } = require("../Utils/events");
 
 module.exports = {
     name: "messageDelete",
@@ -9,15 +7,11 @@ module.exports = {
             return;
         }
 
-        const settings = await economy.getGuildSettings(message.guild.id);
         const snippet = String(message.content || "").slice(0, 800) || "без текста";
-
-        await guildLog(message.guild, settings, "messages", {
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0xED4245)
-                    .setDescription(`Удалено в ${message.channel}\n${message.author || "кто-то"}: ${snippet}`)
-            ]
+        await fireEvent(message.guild, "messageDelete", {
+            user: message.author,
+            channel: `${message.channel}`,
+            text: snippet
         });
     }
 };

@@ -162,8 +162,47 @@ async function initDatabase(filename) {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS web_sessions (
+            id TEXT PRIMARY KEY,
+            user_json TEXT NOT NULL,
+            guilds_json TEXT NOT NULL,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at INTEGER,
+            created_at INTEGER NOT NULL,
+            last_seen INTEGER NOT NULL
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_events (
+            guild_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            channel TEXT,
+            message TEXT,
+            PRIMARY KEY (guild_id, name)
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS shop_items (
+            scope TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            emoji TEXT NOT NULL DEFAULT '',
+            price INTEGER NOT NULL DEFAULT 0,
+            description TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (scope, id)
+        );
+    `);
+
     await ensureColumns();
     await ensureGuildColumns();
+    await ensureStaffColumns();
+    await ensureCustomCommandColumns();
+    await seedGlobalShop();
     await checkpoint();
 
     if (!filename) {
@@ -211,13 +250,73 @@ async function ensureGuildColumns() {
         levels_channel: "TEXT",
         levels_message: "TEXT",
         automod_invites: "INTEGER NOT NULL DEFAULT 0",
-        automod_words: "TEXT"
+        automod_words: "TEXT",
+        disabled_commands: "TEXT",
+        flip_max: "INTEGER NOT NULL DEFAULT 10000",
+        flip_min: "INTEGER NOT NULL DEFAULT 10",
+        pay_max: "INTEGER NOT NULL DEFAULT 0",
+        pay_min: "INTEGER NOT NULL DEFAULT 1",
+        rob_min: "INTEGER NOT NULL DEFAULT 50",
+        buy_max: "INTEGER NOT NULL DEFAULT 20"
     };
 
     for (const [name, definition] of Object.entries(required)) {
         if (!names.has(name)) {
             await db.exec(`ALTER TABLE guilds ADD COLUMN ${name} ${definition}`);
         }
+    }
+}
+
+async function ensureStaffColumns() {
+    const columns = await db.all("PRAGMA table_info(staff)");
+    const names = new Set(columns.map(column => column.name));
+    if (!names.has("rank")) {
+        await db.exec("ALTER TABLE staff ADD COLUMN rank INTEGER NOT NULL DEFAULT 1");
+    }
+}
+
+async function ensureCustomCommandColumns() {
+    const columns = await db.all("PRAGMA table_info(custom_commands)");
+    const names = new Set(columns.map(column => column.name));
+    const required = {
+        title: "TEXT",
+        color: "TEXT",
+        image: "TEXT",
+        thumbnail: "TEXT",
+        footer: "TEXT"
+    };
+    for (const [name, definition] of Object.entries(required)) {
+        if (!names.has(name)) {
+            await db.exec(`ALTER TABLE custom_commands ADD COLUMN ${name} ${definition}`);
+        }
+    }
+}
+
+const DEFAULT_SHOP = [
+    ["coffee", "Кофе", "☕", 80, "Маленький буст настроения"],
+    ["pizza", "Пицца", "🍕", 250, "На всю компанию"],
+    ["phone", "Телефон", "📱", 3500, "Чтобы писать ещё чаще"],
+    ["laptop", "Ноутбук", "💻", 8000, "Для серьёзной работы"],
+    ["car", "Машина", "🚗", 35000, "Уже не пешком"],
+    ["house", "Дом", "🏠", 120000, "Свой угол"],
+    ["yacht", "Яхта", "🛥️", 500000, "Если совсем некуда деньги девать"]
+];
+
+async function seedGlobalShop() {
+    const row = await db.get("SELECT COUNT(*) AS n FROM shop_items WHERE scope = 'global'");
+    if (Number(row?.n) > 0) {
+        return;
+    }
+
+    for (const [id, name, emoji, price, description] of DEFAULT_SHOP) {
+        await db.run(
+            "INSERT OR IGNORE INTO shop_items(scope, id, name, emoji, price, description) VALUES('global', ?, ?, ?, ?, ?)",
+            id,
+            name,
+            emoji,
+            price,
+            description
+        );
     }
 }
 
@@ -420,16 +519,17 @@ async function commitCrime(id, cooldownMs, success, payout, fine, xpGain = 20) {
     });
 }
 
-async function attemptRob(fromId, toId, cooldownMs, success, steal, fine) {
+async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCash = 50) {
     await getUser(fromId);
     await getUser(toId);
     const now = Date.now();
+    const need = Math.max(1, Number(minCash) || 50);
 
     return withTransaction(async () => {
         const target = await db.get("SELECT balance FROM users WHERE id = ?", toId);
         const cash = Number(target?.balance) || 0;
 
-        if (cash < 50) {
+        if (cash < need) {
             return { ok: false, reason: "empty" };
         }
 
@@ -667,6 +767,16 @@ async function takeBalance(id, amount) {
     });
 }
 
+const STAFF_RANK = {
+    none: 0,
+    mod: 1,
+    senior: 2
+};
+
+function normalizeStaffRank(rank) {
+    return Number(rank) >= 2 ? STAFF_RANK.senior : STAFF_RANK.mod;
+}
+
 async function isStaff(id) {
     const row = await db.get(
         "SELECT user_id FROM staff WHERE user_id = ?",
@@ -675,16 +785,30 @@ async function isStaff(id) {
     return Boolean(row);
 }
 
-async function addStaff(id, addedBy) {
+async function getStaffRank(id) {
+    const row = await db.get(
+        "SELECT rank FROM staff WHERE user_id = ?",
+        String(id)
+    );
+    return Number(row?.rank) || 0;
+}
+
+async function addStaff(id, addedBy, rank = STAFF_RANK.mod) {
     const userId = String(id);
-    const result = await db.run(
-        `INSERT OR IGNORE INTO staff(user_id, added_by, added_at)
-         VALUES(?, ?, ?)`,
+    const safeRank = normalizeStaffRank(rank);
+    const existed = await isStaff(userId);
+    await db.run(
+        `INSERT INTO staff(user_id, added_by, added_at, rank)
+         VALUES(?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+            rank = excluded.rank,
+            added_by = excluded.added_by`,
         userId,
         String(addedBy),
-        Date.now()
+        Date.now(),
+        safeRank
     );
-    return result.changes > 0;
+    return { created: !existed, rank: safeRank };
 }
 
 async function removeStaff(id) {
@@ -696,7 +820,333 @@ async function removeStaff(id) {
 }
 
 async function listStaff() {
-    return db.all("SELECT user_id, added_by, added_at FROM staff ORDER BY added_at ASC");
+    return db.all("SELECT user_id, added_by, added_at, rank FROM staff ORDER BY rank DESC, added_at ASC");
+}
+
+function asSession(row) {
+    if (!row) {
+        return null;
+    }
+
+    return {
+        id: row.id,
+        user: JSON.parse(row.user_json || "{}"),
+        guilds: JSON.parse(row.guilds_json || "[]"),
+        token: row.access_token || "",
+        refresh_token: row.refresh_token || "",
+        expires_at: Number(row.expires_at) || 0,
+        createdAt: Number(row.created_at) || 0,
+        lastSeen: Number(row.last_seen) || 0
+    };
+}
+
+async function saveWebSession(id, data) {
+    const now = Date.now();
+    await db.run(
+        `INSERT INTO web_sessions(
+            id, user_json, guilds_json, access_token, refresh_token, expires_at, created_at, last_seen
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            user_json = excluded.user_json,
+            guilds_json = excluded.guilds_json,
+            access_token = excluded.access_token,
+            refresh_token = excluded.refresh_token,
+            expires_at = excluded.expires_at,
+            last_seen = excluded.last_seen`,
+        id,
+        JSON.stringify(data.user || {}),
+        JSON.stringify(Array.isArray(data.guilds) ? data.guilds : []),
+        data.token || data.access_token || "",
+        data.refresh_token || "",
+        Number(data.expires_at) || 0,
+        Number(data.createdAt) || now,
+        now
+    );
+}
+
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
+
+async function getWebSession(id) {
+    if (!id || !db) {
+        return null;
+    }
+
+    const row = await db.get("SELECT * FROM web_sessions WHERE id = ?", id);
+    if (!row) {
+        return null;
+    }
+
+    const lastSeen = Number(row.last_seen) || Number(row.created_at) || 0;
+    if (Date.now() - lastSeen > SESSION_TTL) {
+        await deleteWebSession(id);
+        return null;
+    }
+
+    await db.run("UPDATE web_sessions SET last_seen = ? WHERE id = ?", Date.now(), id);
+    return asSession(row);
+}
+
+async function deleteWebSession(id) {
+    if (!id || !db) {
+        return;
+    }
+    await db.run("DELETE FROM web_sessions WHERE id = ?", id);
+}
+
+function legacyEvent(name, settings) {
+    if (name === "join") {
+        return {
+            enabled: settings.welcomeOn,
+            channel: settings.welcomeChannel,
+            message: settings.welcomeMessage
+        };
+    }
+    if (name === "leave") {
+        return {
+            enabled: settings.welcomeOn,
+            channel: settings.welcomeChannel,
+            message: settings.leaveMessage
+        };
+    }
+    if (name === "ban" || name === "unban" || name === "kick" || name === "automodLog") {
+        return {
+            enabled: settings.logMod,
+            channel: settings.logChannel,
+            message: ""
+        };
+    }
+    if (name === "messageDelete" || name === "messageUpdate") {
+        return {
+            enabled: settings.logMessages,
+            channel: settings.logChannel,
+            message: ""
+        };
+    }
+    if (name === "boost") {
+        return {
+            enabled: settings.logJoins,
+            channel: settings.logChannel,
+            message: ""
+        };
+    }
+    if (name === "levelUp") {
+        return {
+            enabled: settings.levelsOn,
+            channel: settings.levelsChannel,
+            message: settings.levelsMessage
+        };
+    }
+    return { enabled: false, channel: "", message: "" };
+}
+
+async function getGuildEvent(guildId, name) {
+    const row = await db.get(
+        "SELECT enabled, channel, message FROM guild_events WHERE guild_id = ? AND name = ?",
+        String(guildId),
+        name
+    );
+    if (row) {
+        return {
+            enabled: Number(row.enabled) !== 0,
+            channel: row.channel || "",
+            message: row.message || ""
+        };
+    }
+    return legacyEvent(name, await getGuildSettings(guildId));
+}
+
+async function saveGuildEvent(guildId, name, patch = {}) {
+    const current = await getGuildEvent(guildId, name);
+    const next = {
+        enabled: patch.enabled === undefined ? current.enabled : Boolean(patch.enabled),
+        channel: snowflake(patch.channel === undefined ? current.channel : patch.channel),
+        message: String(patch.message === undefined ? current.message : patch.message).slice(0, 2000)
+    };
+
+    await db.run(
+        `INSERT INTO guild_events(guild_id, name, enabled, channel, message)
+         VALUES(?, ?, ?, ?, ?)
+         ON CONFLICT(guild_id, name) DO UPDATE SET
+            enabled = excluded.enabled,
+            channel = excluded.channel,
+            message = excluded.message`,
+        String(guildId),
+        name,
+        next.enabled ? 1 : 0,
+        next.channel,
+        next.message
+    );
+    return next;
+}
+
+async function listGuildEvents(guildId) {
+    const { EVENT_TYPES } = require("../Utils/events");
+    const result = {};
+    for (const type of EVENT_TYPES) {
+        result[type.id] = await getGuildEvent(guildId, type.id);
+    }
+    return result;
+}
+
+function cleanItemId(id) {
+    return String(id ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+}
+
+function asShopItem(row) {
+    return {
+        id: row.id,
+        name: row.name,
+        emoji: row.emoji || "",
+        price: Number(row.price) || 0,
+        description: row.description || "",
+        scope: row.scope
+    };
+}
+
+async function listShopItems(scope) {
+    const rows = await db.all(
+        "SELECT * FROM shop_items WHERE scope = ? ORDER BY price ASC, name ASC",
+        String(scope)
+    );
+    return rows.map(asShopItem);
+}
+
+async function listShop(guildId) {
+    const map = new Map();
+    for (const item of await listShopItems("global")) {
+        map.set(item.id, item);
+    }
+    if (guildId) {
+        for (const item of await listShopItems(String(guildId))) {
+            map.set(item.id, item);
+        }
+    }
+    return [...map.values()].sort((a, b) => a.price - b.price || a.name.localeCompare(b.name, "ru"));
+}
+
+async function getShopItem(guildId, itemId) {
+    const key = cleanItemId(itemId);
+    if (!key) {
+        return null;
+    }
+    if (guildId) {
+        const local = await db.get(
+            "SELECT * FROM shop_items WHERE scope = ? AND id = ?",
+            String(guildId),
+            key
+        );
+        if (local) {
+            return asShopItem(local);
+        }
+    }
+    const global = await db.get(
+        "SELECT * FROM shop_items WHERE scope = 'global' AND id = ?",
+        key
+    );
+    return global ? asShopItem(global) : null;
+}
+
+async function findShopItem(itemId) {
+    const key = cleanItemId(itemId);
+    if (!key) {
+        return null;
+    }
+    const row = await db.get(
+        "SELECT * FROM shop_items WHERE id = ? ORDER BY CASE scope WHEN 'global' THEN 1 ELSE 0 END LIMIT 1",
+        key
+    );
+    if (row) {
+        return asShopItem(row);
+    }
+    const named = await db.get(
+        "SELECT * FROM shop_items WHERE lower(name) = ? LIMIT 1",
+        String(itemId ?? "").trim().toLowerCase()
+    );
+    return named ? asShopItem(named) : null;
+}
+
+async function saveShopItem(scope, item) {
+    const id = cleanItemId(item.id);
+    const name = String(item.name ?? "").trim().slice(0, 64);
+    if (!id || !name) {
+        return { ok: false, reason: "invalid" };
+    }
+
+    await db.run(
+        `INSERT INTO shop_items(scope, id, name, emoji, price, description)
+         VALUES(?, ?, ?, ?, ?, ?)
+         ON CONFLICT(scope, id) DO UPDATE SET
+            name = excluded.name,
+            emoji = excluded.emoji,
+            price = excluded.price,
+            description = excluded.description`,
+        String(scope),
+        id,
+        name,
+        String(item.emoji ?? "").slice(0, 16),
+        Math.max(0, Math.min(100000000, Number(item.price) || 0)),
+        String(item.description ?? "").slice(0, 240)
+    );
+    return { ok: true, id };
+}
+
+async function deleteShopItem(scope, id) {
+    const result = await db.run(
+        "DELETE FROM shop_items WHERE scope = ? AND id = ?",
+        String(scope),
+        cleanItemId(id)
+    );
+    return result.changes > 0;
+}
+
+async function setWallet(id, patch = {}) {
+    await getUser(id);
+    if (patch.balance !== undefined) {
+        await db.run(
+            "UPDATE users SET balance = ? WHERE id = ?",
+            Math.max(0, Math.min(1e12, Math.floor(Number(patch.balance) || 0))),
+            String(id)
+        );
+    }
+    if (patch.bank !== undefined) {
+        await db.run(
+            "UPDATE users SET bank = ? WHERE id = ?",
+            Math.max(0, Math.min(1e12, Math.floor(Number(patch.bank) || 0))),
+            String(id)
+        );
+    }
+    return getUser(id);
+}
+
+async function searchUsers(query, limit = 20) {
+    const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+    const q = String(query ?? "").trim();
+    if (!q) {
+        return db.all(
+            "SELECT * FROM users ORDER BY (balance + bank) DESC, balance DESC LIMIT ?",
+            safeLimit
+        );
+    }
+    return db.all(
+        "SELECT * FROM users WHERE id LIKE ? ORDER BY (balance + bank) DESC LIMIT ?",
+        `%${q.replace(/[%_]/g, "")}%`,
+        safeLimit
+    );
+}
+
+function asCustomCommand(row) {
+    if (!row) {
+        return null;
+    }
+    return {
+        name: row.name,
+        response: row.response || "",
+        title: row.title || "",
+        color: row.color || "",
+        image: row.image || "",
+        thumbnail: row.thumbnail || "",
+        footer: row.footer || ""
+    };
 }
 
 function asGuildSettings(row, id) {
@@ -717,7 +1167,17 @@ function asGuildSettings(row, id) {
         levelsChannel: row?.levels_channel || "",
         levelsMessage: row?.levels_message || "",
         automodInvites: Number(row?.automod_invites) !== 0,
-        automodWords: row?.automod_words || ""
+        automodWords: row?.automod_words || "",
+        disabledCommands: String(row?.disabled_commands || "")
+            .split(",")
+            .map(name => name.trim())
+            .filter(Boolean),
+        flipMax: Number(row?.flip_max) || 10000,
+        flipMin: Math.max(1, Number(row?.flip_min) || 10),
+        payMax: Number(row?.pay_max) || 0,
+        payMin: Math.max(1, Number(row?.pay_min) || 1),
+        robMin: Math.max(1, Number(row?.rob_min) || 50),
+        buyMax: Math.max(1, Math.min(50, Number(row?.buy_max) || 20))
     };
 }
 
@@ -774,15 +1234,32 @@ async function saveGuildSettings(guildId, patch) {
         levelsChannel: snowflake(pick(patch, current, "levelsChannel")),
         levelsMessage: String(pick(patch, current, "levelsMessage") ?? "").slice(0, 1000),
         automodInvites: pick(patch, current, "automodInvites") ? 1 : 0,
-        automodWords: parseWords(pick(patch, current, "automodWords")).join("\n")
+        automodWords: parseWords(pick(patch, current, "automodWords")).join("\n"),
+        disabledCommands: Array.isArray(pick(patch, current, "disabledCommands"))
+            ? pick(patch, current, "disabledCommands")
+            : String(pick(patch, current, "disabledCommands") || "")
+                .split(",")
+                .map(name => name.trim())
+                .filter(Boolean),
+        flipMax: Math.max(10, Math.min(1000000, Number(pick(patch, current, "flipMax")) || 10000)),
+        flipMin: Math.max(1, Math.min(10000, Number(pick(patch, current, "flipMin")) || 10)),
+        payMax: Math.max(0, Math.min(100000000, Number(pick(patch, current, "payMax")) || 0)),
+        payMin: Math.max(1, Math.min(1000000, Number(pick(patch, current, "payMin")) || 1)),
+        robMin: Math.max(1, Math.min(100000, Number(pick(patch, current, "robMin")) || 50)),
+        buyMax: Math.max(1, Math.min(50, Number(pick(patch, current, "buyMax")) || 20))
     };
+
+    if (next.flipMin > next.flipMax) {
+        next.flipMin = next.flipMax;
+    }
 
     await db.run(
         `INSERT INTO guilds(
             id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message,
             autorole_ids, log_channel, log_joins, log_messages, log_mod,
-            levels_on, levels_channel, levels_message, automod_invites, automod_words
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            levels_on, levels_channel, levels_message, automod_invites, automod_words,
+            disabled_commands, flip_max, flip_min, pay_max, pay_min, rob_min, buy_max
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
@@ -799,7 +1276,14 @@ async function saveGuildSettings(guildId, patch) {
             levels_channel = excluded.levels_channel,
             levels_message = excluded.levels_message,
             automod_invites = excluded.automod_invites,
-            automod_words = excluded.automod_words`,
+            automod_words = excluded.automod_words,
+            disabled_commands = excluded.disabled_commands,
+            flip_max = excluded.flip_max,
+            flip_min = excluded.flip_min,
+            pay_max = excluded.pay_max,
+            pay_min = excluded.pay_min,
+            rob_min = excluded.rob_min,
+            buy_max = excluded.buy_max`,
         id,
         next.prefix,
         next.prefixText,
@@ -816,7 +1300,14 @@ async function saveGuildSettings(guildId, patch) {
         next.levelsChannel,
         next.levelsMessage,
         next.automodInvites,
-        next.automodWords
+        next.automodWords,
+        next.disabledCommands.join(","),
+        next.flipMax,
+        next.flipMin,
+        next.payMax,
+        next.payMin,
+        next.robMin,
+        next.buyMax
     );
 
     return getGuildSettings(id);
@@ -827,10 +1318,11 @@ function cleanCommandName(name) {
 }
 
 async function listCustomCommands(guildId) {
-    return db.all(
-        "SELECT name, response FROM custom_commands WHERE guild_id = ? ORDER BY name",
+    const rows = await db.all(
+        "SELECT name, response, title, color, image, thumbnail, footer FROM custom_commands WHERE guild_id = ? ORDER BY name",
         String(guildId)
     );
+    return rows.map(asCustomCommand);
 }
 
 async function getCustomCommand(guildId, name) {
@@ -839,17 +1331,19 @@ async function getCustomCommand(guildId, name) {
         return null;
     }
     const row = await db.get(
-        "SELECT name, response FROM custom_commands WHERE guild_id = ? AND name = ?",
+        "SELECT name, response, title, color, image, thumbnail, footer FROM custom_commands WHERE guild_id = ? AND name = ?",
         String(guildId),
         key
     );
-    return row ?? null;
+    return asCustomCommand(row);
 }
 
-async function saveCustomCommand(guildId, name, response) {
+async function saveCustomCommand(guildId, name, response, extra = {}) {
     const key = cleanCommandName(name);
-    const text = String(response ?? "").trim().slice(0, 1000);
-    if (!key || !text) {
+    const data = typeof response === "object" && response !== null ? response : { response, ...extra };
+    const text = String(data.response ?? "").trim().slice(0, 4000);
+    const title = String(data.title ?? "").trim().slice(0, 256);
+    if (!key || (!text && !title)) {
         return { ok: false, reason: "invalid" };
     }
 
@@ -858,16 +1352,28 @@ async function saveCustomCommand(guildId, name, response) {
         String(guildId)
     );
     const existing = await getCustomCommand(guildId, key);
-    if (!existing && (Number(count?.n) || 0) >= 25) {
+    if (!existing && (Number(count?.n) || 0) >= 40) {
         return { ok: false, reason: "limit" };
     }
 
     await db.run(
-        `INSERT INTO custom_commands(guild_id, name, response) VALUES(?, ?, ?)
-         ON CONFLICT(guild_id, name) DO UPDATE SET response = excluded.response`,
+        `INSERT INTO custom_commands(guild_id, name, response, title, color, image, thumbnail, footer)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(guild_id, name) DO UPDATE SET
+            response = excluded.response,
+            title = excluded.title,
+            color = excluded.color,
+            image = excluded.image,
+            thumbnail = excluded.thumbnail,
+            footer = excluded.footer`,
         String(guildId),
         key,
-        text
+        text,
+        title,
+        String(data.color ?? "").trim().slice(0, 16),
+        String(data.image ?? "").trim().slice(0, 500),
+        String(data.thumbnail ?? "").trim().slice(0, 500),
+        String(data.footer ?? "").trim().slice(0, 200)
     );
     return { ok: true, name: key };
 }
@@ -919,10 +1425,27 @@ module.exports = {
     getInventory,
     buyItem,
     takeBalance,
+    STAFF_RANK,
     isStaff,
+    getStaffRank,
     addStaff,
     removeStaff,
     listStaff,
+    SESSION_TTL,
+    saveWebSession,
+    getWebSession,
+    deleteWebSession,
+    getGuildEvent,
+    saveGuildEvent,
+    listGuildEvents,
+    listShopItems,
+    listShop,
+    getShopItem,
+    findShopItem,
+    saveShopItem,
+    deleteShopItem,
+    setWallet,
+    searchUsers,
     isPrefixEnabled,
     setPrefixEnabled,
     getGuildSettings,

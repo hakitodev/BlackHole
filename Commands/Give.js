@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { requireStaff } = require("../Utils/staff");
+const { requireSenior } = require("../Utils/staff");
 const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
 const { reply, error, COLOR } = require("../Utils/reply");
 
@@ -22,7 +22,7 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        if (!(await requireStaff(interaction))) {
+        if (!(await requireSenior(interaction))) {
             return;
         }
 

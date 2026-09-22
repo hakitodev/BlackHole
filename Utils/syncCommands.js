@@ -7,12 +7,12 @@ async function clearGuildCommands(client) {
 
     for (const guild of guilds) {
         try {
+            await guild.commands.set([]);
+            console.log(`Серверные команды очищены: ${guild.name}`);
         } catch (error) {
             console.error(`Не удалось очистить команды ${guild.id}:`, error);
         }
     }
-    await guild.commands.set([]);
-    console.log(`Серверные команды очищены: ${guilds.name}`);
 }
 
 async function syncCommands(client) {

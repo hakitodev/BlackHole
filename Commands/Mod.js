@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { isOwner, requireOwner, isStaff } = require("../Utils/staff");
+const { isOwner, requireOwner, isStaff, getRank, RANK, rankLabel, isSenior } = require("../Utils/staff");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -16,6 +16,15 @@ module.exports = {
                         .setName("user")
                         .setDescription("Кого назначить")
                         .setRequired(true)
+                )
+                .addStringOption(option =>
+                    option
+                        .setName("rank")
+                        .setDescription("Уровень")
+                        .addChoices(
+                            { name: "Модератор", value: "mod" },
+                            { name: "Высший модератор", value: "senior" }
+                        )
                 )
         )
         .addSubcommand(sub =>
@@ -54,13 +63,16 @@ module.exports = {
 
             return reply(interaction, {
                 title: "Модераторы",
-                description: rows.map((row, index) => `**${index + 1}.** <@${row.user_id}>`).join("\n"),
+                description: rows.map((row, index) =>
+                    `**${index + 1}.** <@${row.user_id}> — ${rankLabel(Number(row.rank) || 1)}`
+                ).join("\n"),
                 ephemeral: true
             });
         }
 
-        if (!(await requireOwner(interaction))) {
-            return;
+        const actorRank = await getRank(interaction);
+        if (actorRank < RANK.senior) {
+            return error(interaction, "Только высший модератор или владелец.");
         }
 
         const target = interaction.options.getUser("user");
@@ -78,15 +90,32 @@ module.exports = {
                 return error(interaction, "Это владелец бота.");
             }
 
-            const added = await economy.addStaff(target.id, interaction.user.id);
+            const wanted = interaction.options.getString("rank") === "senior"
+                ? RANK.senior
+                : RANK.mod;
+
+            if (wanted >= RANK.senior && !(await requireOwner(interaction))) {
+                return;
+            }
+
+            const result = await economy.addStaff(target.id, interaction.user.id, wanted);
 
             return reply(interaction, {
                 color: COLOR.green,
-                description: added
-                    ? `${target} теперь модератор.`
-                    : `${target} уже модератор.`,
+                description: result.created
+                    ? `${target} теперь ${rankLabel(result.rank)}.`
+                    : `${target} теперь ${rankLabel(result.rank)}.`,
                 ephemeral: true
             });
+        }
+
+        if (!(await isSenior(interaction))) {
+            return error(interaction, "Только высший модератор или владелец.");
+        }
+
+        const targetRank = await economy.getStaffRank(target.id);
+        if (targetRank >= RANK.senior && !isOwner(interaction)) {
+            return error(interaction, "Высшего модератора снимает только владелец.");
         }
 
         const removed = await economy.removeStaff(target.id);

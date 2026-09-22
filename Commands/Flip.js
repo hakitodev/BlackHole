@@ -17,15 +17,20 @@ module.exports = {
     aliases: ["coinflip", "cf"],
 
     async execute(interaction) {
+        const settings = interaction.guild
+            ? await economy.getGuildSettings(interaction.guild.id)
+            : { flipMin: 10, flipMax: 10000 };
+        const min = settings.flipMin || 10;
+        const max = settings.flipMax || 10000;
         const user = await economy.getUser(interaction.user.id);
         const parsed = parseAmount(rawAmount(interaction), {
-            min: 10,
-            max: 10000,
+            min,
+            max,
             available: user.balance
         });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { min: 10, max: 10000 }));
+            return error(interaction, amountMessage(parsed, { min, max }));
         }
 
         const key = `flip:${interaction.user.id}`;

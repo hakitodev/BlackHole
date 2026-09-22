@@ -6,7 +6,7 @@ const os = require("os");
 const path = require("path");
 const economy = require("../Database/Economy");
 const { handleRequest } = require("../Web/app");
-const { createSession, cookieHeader } = require("../Web/session");
+const { createSession, cookieHeader, forgetMemory, getSession } = require("../Web/session");
 const { inviteUrl, authorizeUrl } = require("../Web/oauth");
 const { settingsPage } = require("../Web/html");
 
@@ -69,8 +69,8 @@ function fakeClient(guildId = GUILD_ID) {
     };
 }
 
-function sessionCookie(extra = {}) {
-    const id = createSession({
+async function sessionCookie(extra = {}) {
+    const id = await createSession({
         user: { id: "1", username: "kit", global_name: "Kit" },
         guilds: [
             {
@@ -141,7 +141,7 @@ test("GET /servers показывает серверы, где есть прав
     const res = mockRes();
     await handleRequest(mockReq({
         url: "/servers",
-        headers: { cookie: sessionCookie() }
+        headers: { cookie: await sessionCookie() }
     }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /Мои серверы/);
@@ -155,7 +155,7 @@ test("GET /servers/:id редиректит в general", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
         url: `/servers/${GUILD_ID}`,
-        headers: { cookie: sessionCookie() }
+        headers: { cookie: await sessionCookie() }
     }), res, fakeClient());
     assert.equal(res.statusCode, 302);
     assert.equal(res.headers.Location, `/servers/${GUILD_ID}/general`);
@@ -165,7 +165,7 @@ test("GET /servers/:id/general форма и экранирование имен
     const res = mockRes();
     await handleRequest(mockReq({
         url: `/servers/${GUILD_ID}/general`,
-        headers: { cookie: sessionCookie() }
+        headers: { cookie: await sessionCookie() }
     }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /Сервер &lt;script&gt;/);
@@ -173,47 +173,48 @@ test("GET /servers/:id/general форма и экранирование имен
     assert.match(res.body, /name="prefixText"/);
     assert.match(res.body, /Автороль/);
     assert.match(res.body, /Автомод/);
+    assert.match(res.body, /Ограничения/);
+    assert.match(res.body, /Ивенты/);
 });
 
-test("GET /servers/:id/welcome каналы без войса", async () => {
+test("GET /servers/:id/join каналы без войса", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
-        url: `/servers/${GUILD_ID}/welcome`,
-        headers: { cookie: sessionCookie() }
+        url: `/servers/${GUILD_ID}/join`,
+        headers: { cookie: await sessionCookie() }
     }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /#general/);
     assert.doesNotMatch(res.body, /#voice/);
-    assert.match(res.body, /name="welcomeMessage"/);
+    assert.match(res.body, /name="message"/);
+    assert.match(res.body, /Вход/);
 });
 
-test("POST /servers/:id/welcome сохраняет настройки", async () => {
+test("POST /servers/:id/join сохраняет ивент отдельно", async () => {
     const res = mockRes();
     const body = new URLSearchParams({
-        welcomeOn: "1",
-        welcomeChannel: "111222333444555666",
-        welcomeMessage: "Привет, {user}",
-        leaveMessage: "Пока"
+        enabled: "1",
+        channel: "111222333444555666",
+        message: "Привет, {user}"
     }).toString();
 
     await handleRequest(mockReq({
         method: "POST",
-        url: `/servers/${GUILD_ID}/welcome`,
+        url: `/servers/${GUILD_ID}/join`,
         headers: {
-            cookie: sessionCookie(),
+            cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
         },
         body
     }), res, fakeClient());
 
     assert.equal(res.statusCode, 302);
-    assert.equal(res.headers.Location, `/servers/${GUILD_ID}/welcome?saved=1`);
+    assert.equal(res.headers.Location, `/servers/${GUILD_ID}/join?saved=1`);
 
-    const settings = await economy.getGuildSettings(GUILD_ID);
-    assert.equal(settings.welcomeOn, true);
-    assert.equal(settings.welcomeChannel, "111222333444555666");
-    assert.equal(settings.welcomeMessage, "Привет, {user}");
-    assert.equal(settings.leaveMessage, "Пока");
+    const event = await economy.getGuildEvent(GUILD_ID, "join");
+    assert.equal(event.enabled, true);
+    assert.equal(event.channel, "111222333444555666");
+    assert.equal(event.message, "Привет, {user}");
 });
 
 test("POST /servers/:id/general не затирает welcome", async () => {
@@ -226,7 +227,7 @@ test("POST /servers/:id/general не затирает welcome", async () => {
         method: "POST",
         url: `/servers/${GUILD_ID}/general`,
         headers: {
-            cookie: sessionCookie(),
+            cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
         },
         body: "prefix=1&prefixText=%3F"
@@ -243,7 +244,7 @@ test("POST /servers/:id/commands добавляет кастом-команду"
         method: "POST",
         url: `/servers/${GUILD_ID}/commands`,
         headers: {
-            cookie: sessionCookie(),
+            cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
         },
         body: "op=add&name=hi&response=Привет%2C+%7Buser%7D"
@@ -254,11 +255,95 @@ test("POST /servers/:id/commands добавляет кастом-команду"
     assert.equal(custom.response, "Привет, {user}");
 });
 
+test("POST /servers/:id/commands сохраняет эмбед", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/commands`,
+        headers: {
+            cookie: await sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=save&name=rules&title=Правила&response=Читай%20чат&colorHex=%23ffaa00&footer=BH"
+    }), res, fakeClient());
+
+    const custom = await economy.getCustomCommand(GUILD_ID, "rules");
+    assert.equal(custom.title, "Правила");
+    assert.equal(custom.color, "#ffaa00");
+    assert.equal(custom.footer, "BH");
+});
+
+test("POST /servers/:id/limits сохраняет ограничения", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/limits`,
+        headers: {
+            cookie: await sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "disabled=flip&disabled=rob&flipMin=20&flipMax=500&payMin=5&payMax=1000&robMin=80&buyMax=3"
+    }), res, fakeClient());
+
+    assert.equal(res.statusCode, 302);
+    const settings = await economy.getGuildSettings(GUILD_ID);
+    assert.deepEqual(settings.disabledCommands.sort(), ["flip", "rob"]);
+    assert.equal(settings.flipMax, 500);
+    assert.equal(settings.flipMin, 20);
+    assert.equal(settings.payMax, 1000);
+    assert.equal(settings.robMin, 80);
+    assert.equal(settings.buyMax, 3);
+});
+
+test("GET /admin/economy без ранга — 403", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: "/admin/economy",
+        headers: { cookie: await sessionCookie({ user: { id: "99", username: "nope" } }) }
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 403);
+});
+
+test("высший модер правит экономику и глобальный шоп", async () => {
+    await economy.addStaff("1", "owner", 2);
+    const cookie = await sessionCookie();
+
+    const eco = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: "/admin/economy",
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "id=123456789012345678&balance=900&bank=50"
+    }), eco, fakeClient());
+    assert.equal(eco.statusCode, 302);
+    const user = await economy.getUser("123456789012345678");
+    assert.equal(user.balance, 900);
+    assert.equal(user.bank, 50);
+
+    const shop = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: "/admin/shop",
+        headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=save&id=star&name=Звезда&emoji=%E2%AD%90&price=12&description=тест"
+    }), shop, fakeClient());
+    assert.equal(shop.statusCode, 302);
+    const item = await economy.getShopItem(null, "star");
+    assert.equal(item.name, "Звезда");
+    assert.equal(item.price, 12);
+});
+
 test("GET /servers/:id без прав — 403", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
         url: "/servers/999888777666555444",
-        headers: { cookie: sessionCookie() }
+        headers: { cookie: await sessionCookie() }
     }), res, fakeClient());
     assert.equal(res.statusCode, 403);
     assert.match(res.body, /Нет прав/);
@@ -299,4 +384,15 @@ test("settingsPage помечает сохранённое", () => {
         saved: true
     });
     assert.match(html, /Сохранено/);
+});
+
+test("сессия живёт после очистки памяти — как рестарт Render", async () => {
+    const id = await createSession({
+        user: { id: "42", username: "stay" },
+        guilds: [{ id: GUILD_ID, name: "Сервер", owner: true, permissions: "8" }]
+    });
+    forgetMemory();
+    const restored = await getSession(id);
+    assert.equal(restored.user.username, "stay");
+    assert.equal(restored.id, id);
 });

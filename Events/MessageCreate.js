@@ -5,10 +5,10 @@ const { stripPrefix, splitCommand } = require("../Utils/prefix");
 const { createMessageContext } = require("../Utils/messageCommand");
 const { runCommand, resolveCommand } = require("../Utils/runCommand");
 const { fill } = require("../Utils/placeholders");
-const { guildLog } = require("../Utils/log");
-const { getChannel } = require("../Utils/channel");
 const { canGainXp, xpGain } = require("../Utils/xp");
 const { parseWords, hasInvite, findBannedWord, isPrivileged } = require("../Utils/automod");
+const { fireEvent } = require("../Utils/events");
+const { parseColor, isUrl } = require("../Utils/color");
 
 async function repliedUser(message) {
     if (message.mentions.repliedUser) {
@@ -36,40 +36,14 @@ async function handleAutomod(message, settings) {
     }
 
     await message.delete().catch(() => {});
-    await guildLog(message.guild, settings, "mod", {
-        embeds: [
-            new EmbedBuilder()
-                .setColor(0xFEE75C)
-                .setDescription(
-                    `Автомод удалил сообщение ${message.author} в ${message.channel}: ${
-                        inviteHit ? "инвайт" : `слово «${wordHit}»`
-                    }`
-                )
-        ]
+    const reason = inviteHit ? "инвайт" : `слово «${wordHit}»`;
+    await fireEvent(message.guild, "automodLog", {
+        user: message.author,
+        channel: `${message.channel}`,
+        reason,
+        text: String(message.content || "").slice(0, 400)
     });
     return true;
-}
-
-async function handleLevelUp(message, settings, progress) {
-    if (!settings.levelsOn || !progress?.leveled) {
-        return;
-    }
-
-    const text = fill(
-        settings.levelsMessage || "{user} теперь {level} уровень!",
-        { user: message.author, guild: message.guild, level: progress.level }
-    );
-    const channel = settings.levelsChannel
-        ? await getChannel(message.guild, settings.levelsChannel)
-        : message.channel;
-
-    if (!channel) {
-        return;
-    }
-
-    await channel.send({
-        embeds: [new EmbedBuilder().setColor(0xFEE75C).setDescription(text)]
-    }).catch(() => {});
 }
 
 module.exports = {
@@ -90,7 +64,12 @@ module.exports = {
 
             if (canGainXp(message.guild.id, message.author.id)) {
                 const progress = await economy.addXp(message.author.id, xpGain());
-                await handleLevelUp(message, settings, progress);
+                if (progress?.leveled) {
+                    await fireEvent(message.guild, "levelUp", {
+                        user: message.author,
+                        level: progress.level
+                    }, message.channel);
+                }
             }
 
             prefix = settings.prefixText || PREFIX;
@@ -131,15 +110,24 @@ module.exports = {
             return;
         }
 
-        await message.channel.send({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0x5865F2)
-                    .setDescription(fill(custom.response, {
-                        user: message.author,
-                        guild: message.guild
-                    }))
-            ]
-        }).catch(() => {});
+        const vars = { user: message.author, guild: message.guild };
+        const embed = new EmbedBuilder().setColor(parseColor(custom.color));
+        if (custom.title) {
+            embed.setTitle(fill(custom.title, vars).slice(0, 256));
+        }
+        if (custom.response) {
+            embed.setDescription(fill(custom.response, vars).slice(0, 4000));
+        }
+        if (isUrl(custom.image)) {
+            embed.setImage(custom.image);
+        }
+        if (isUrl(custom.thumbnail)) {
+            embed.setThumbnail(custom.thumbnail);
+        }
+        if (custom.footer) {
+            embed.setFooter({ text: fill(custom.footer, vars).slice(0, 200) });
+        }
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
     }
 };

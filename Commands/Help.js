@@ -35,7 +35,7 @@ module.exports = {
             },
             {
                 name: "Мод",
-                value: "`/mod` `/give` `/take` `/authpanel` `/clear` `/slowmode`"
+                value: "`/mod` `/give` `/take` `/eco` `/authpanel` `/clear` `/slowmode`"
             }
         ];
 
@@ -55,7 +55,7 @@ module.exports = {
 
         fields.push({
             name: "Панель",
-            value: "Приветствия, автороль, логи, уровни, автомод и свои команды"
+            value: "Ивенты по отдельности, эмбед-команды, шоп, ограничения. Высшие модеры ещё правят экономику и глобальный шоп."
         });
 
         return reply(interaction, {

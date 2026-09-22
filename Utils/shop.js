@@ -1,83 +1,39 @@
-const ITEMS = {
-    coffee: {
-        id: "coffee",
-        name: "Кофе",
-        emoji: "☕",
-        price: 80,
-        description: "Маленький буст настроения"
-    },
-    pizza: {
-        id: "pizza",
-        name: "Пицца",
-        emoji: "🍕",
-        price: 250,
-        description: "На всю компанию"
-    },
-    phone: {
-        id: "phone",
-        name: "Телефон",
-        emoji: "📱",
-        price: 3500,
-        description: "Чтобы писать ещё чаще"
-    },
-    laptop: {
-        id: "laptop",
-        name: "Ноутбук",
-        emoji: "💻",
-        price: 8000,
-        description: "Для серьёзной работы"
-    },
-    car: {
-        id: "car",
-        name: "Машина",
-        emoji: "🚗",
-        price: 35000,
-        description: "Уже не пешком"
-    },
-    house: {
-        id: "house",
-        name: "Дом",
-        emoji: "🏠",
-        price: 120000,
-        description: "Свой угол"
-    },
-    yacht: {
-        id: "yacht",
-        name: "Яхта",
-        emoji: "🛥️",
-        price: 500000,
-        description: "Если совсем некуда деньги девать"
-    }
-};
+const economy = require("../Database/Economy");
 
-function list() {
-    return Object.values(ITEMS);
+async function list(guildId) {
+    return economy.listShop(guildId);
 }
 
-function get(id) {
-    return ITEMS[id] ?? null;
+async function get(id, guildId) {
+    return (await economy.getShopItem(guildId, id)) || (await economy.findShopItem(id));
 }
 
-function find(query) {
+async function find(guildId, query) {
     const q = String(query ?? "").trim().toLowerCase();
     if (!q) {
         return null;
     }
 
-    return get(q)
-        ?? list().find(item =>
-            item.name.toLowerCase() === q ||
-            item.id.toLowerCase() === q
-        )
-        ?? null;
+    const direct = await economy.getShopItem(guildId, q);
+    if (direct) {
+        return direct;
+    }
+
+    const items = await economy.listShop(guildId);
+    return items.find(item =>
+        item.name.toLowerCase() === q ||
+        item.id.toLowerCase() === q
+    ) ?? await economy.findShopItem(q);
 }
 
 function format(item) {
-    return `${item.emoji} ${item.name}`;
+    if (!item) {
+        return "";
+    }
+    return `${item.emoji ? `${item.emoji} ` : ""}${item.name}`.trim();
 }
 
 module.exports = {
-    ITEMS,
     list,
     get,
     find,

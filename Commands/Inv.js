@@ -26,11 +26,12 @@ module.exports = {
             );
         }
 
-        const lines = rows.map(row => {
-            const item = get(row.item_id);
+        const lines = [];
+        for (const row of rows) {
+            const item = await get(row.item_id, interaction.guildId);
             const label = item ? format(item) : row.item_id;
-            return `${label} — **${row.qty}**`;
-        });
+            lines.push(`${label} — **${row.qty}**`);
+        }
 
         return reply(interaction, {
             color: COLOR.pink,

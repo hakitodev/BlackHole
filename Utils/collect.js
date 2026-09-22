@@ -2,10 +2,13 @@ const economy = require("../Database/Economy");
 const { integer, pick } = require("./random");
 const { formatDuration } = require("./time");
 
-const DAILY_REWARD = 100 + integer(200, 1000);
 const DAILY_COOLDOWN = 24 * 60 * 60 * 1000;
 const WORK_COOLDOWN = 45 * 60 * 1000;
 const CRIME_COOLDOWN = 2 * 60 * 60 * 1000;
+
+function dailyReward() {
+    return integer(300, 1100);
+}
 
 const JOBS = [
     { text: "отработал смену в магазине", min: 80, max: 180 },
@@ -30,7 +33,7 @@ async function runCollect(userId, random = Math.random) {
     const parts = [];
     let level = null;
 
-    const daily = await economy.claimDaily(userId, DAILY_REWARD, DAILY_COOLDOWN);
+    const daily = await economy.claimDaily(userId, dailyReward(), DAILY_COOLDOWN);
     if (daily.ok) {
         parts.push({ id: "daily", ok: true, amount: daily.amount });
         if (daily.leveled) {
@@ -132,7 +135,7 @@ function formatCollect(result) {
 }
 
 module.exports = {
-    DAILY_REWARD,
+    dailyReward,
     DAILY_COOLDOWN,
     WORK_COOLDOWN,
     CRIME_COOLDOWN,

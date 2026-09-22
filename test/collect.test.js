@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const economy = require("../Database/Economy");
-const { runCollect, formatCollect, DAILY_REWARD } = require("../Utils/collect");
+const { runCollect, formatCollect } = require("../Utils/collect");
 
 let dir;
 let n = 0;
@@ -30,7 +30,8 @@ test("collect: забирает daily, work и crime разом", async () => {
 
     assert.equal(result.claimed, true);
     assert.equal(result.parts[0].ok, true);
-    assert.equal(result.parts[0].amount, DAILY_REWARD);
+    assert.ok(result.parts[0].amount >= 300);
+    assert.ok(result.parts[0].amount <= 1100);
     assert.equal(result.parts[1].ok, true);
     assert.equal(result.parts[2].ok, true);
     assert.equal(result.parts[2].success, true);
@@ -62,5 +63,5 @@ test("collect: провал crime не отменяет daily и work", async ()
     assert.equal(result.parts[2].ok, true);
     assert.equal(result.parts[2].success, false);
     assert.ok(result.balance >= 0);
-    assert.ok(result.balance < DAILY_REWARD + result.parts[1].amount);
+    assert.ok(result.balance < result.parts[0].amount + result.parts[1].amount + 1);
 });
