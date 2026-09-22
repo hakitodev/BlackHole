@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { pick } = require("../Utils/random");
+const { reply, error } = require("../Utils/reply");
 
 const ANSWERS = [
     "Да.",
@@ -28,8 +29,12 @@ module.exports = {
 
     async execute(interaction) {
         const question = interaction.options.getString("question");
-        await interaction.reply(
-            `**${question}**\n${pick(ANSWERS)}`
-        );
+        if (!question) {
+            return error(interaction, "Задай вопрос.");
+        }
+
+        return reply(interaction, {
+            description: `**${question}**\n${pick(ANSWERS)}`
+        });
     }
 };

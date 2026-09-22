@@ -1,15 +1,16 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { isOwner, requireOwner, isStaff } = require("../Utils/staff");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("mod")
-        .setDescription("Модераторы межгильдной экономики")
+        .setDescription("Модераторы")
         .addSubcommand(sub =>
             sub
                 .setName("add")
-                .setDescription("Назначить модератора")
+                .setDescription("Назначить")
                 .addUserOption(option =>
                     option
                         .setName("user")
@@ -20,7 +21,7 @@ module.exports = {
         .addSubcommand(sub =>
             sub
                 .setName("remove")
-                .setDescription("Снять модератора")
+                .setDescription("Снять")
                 .addUserOption(option =>
                     option
                         .setName("user")
@@ -31,46 +32,31 @@ module.exports = {
         .addSubcommand(sub =>
             sub
                 .setName("list")
-                .setDescription("Список модераторов")
+                .setDescription("Список")
         ),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 
         if (!sub) {
-            return interaction.reply({
-                content: "Используй `add`, `remove` или `list`.",
-                ephemeral: true
-            });
+            return error(interaction, "add, remove или list.");
         }
 
         if (sub === "list") {
             if (!(await isStaff(interaction))) {
-                return interaction.reply({
-                    content: "Нужно быть владельцем или модератором экономики.",
-                    ephemeral: true
-                });
+                return error(interaction, "Нужно быть владельцем или модератором.");
             }
 
             const rows = await economy.listStaff();
             if (!rows.length) {
-                return interaction.reply({
-                    content: "Модераторов пока нет. Владелец может добавить через `/mod add`.",
-                    ephemeral: true
-                });
+                return error(interaction, "Модераторов нет.");
             }
 
-            const lines = rows.map((row, index) =>
-                `**${index + 1}.** <@${row.user_id}>`
-            );
-
-            const embed = new EmbedBuilder()
-                .setColor(0x5865F2)
-                .setTitle("Модераторы экономики")
-                .setDescription(lines.join("\n"))
-                .setFooter({ text: "Действуют на всех серверах бота" });
-
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return reply(interaction, {
+                title: "Модераторы",
+                description: rows.map((row, index) => `**${index + 1}.** <@${row.user_id}>`).join("\n"),
+                ephemeral: true
+            });
         }
 
         if (!(await requireOwner(interaction))) {
@@ -80,32 +66,24 @@ module.exports = {
         const target = interaction.options.getUser("user");
 
         if (!target) {
-            return interaction.reply({
-                content: "Укажи пользователя или ответь на его сообщение.",
-                ephemeral: true
-            });
+            return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
         if (target.bot) {
-            return interaction.reply({
-                content: "Бота нельзя назначить модератором.",
-                ephemeral: true
-            });
+            return error(interaction, "Бота нельзя назначить.");
         }
 
         if (sub === "add") {
             if (isOwner({ client: interaction.client, user: target })) {
-                return interaction.reply({
-                    content: "Это и так владелец бота.",
-                    ephemeral: true
-                });
+                return error(interaction, "Это владелец бота.");
             }
 
             const added = await economy.addStaff(target.id, interaction.user.id);
 
-            return interaction.reply({
-                content: added
-                    ? `${target} теперь модератор экономики на всех серверах. Доступны \`/give\` и \`/take\`.`
+            return reply(interaction, {
+                color: COLOR.green,
+                description: added
+                    ? `${target} теперь модератор.`
                     : `${target} уже модератор.`,
                 ephemeral: true
             });
@@ -113,9 +91,9 @@ module.exports = {
 
         const removed = await economy.removeStaff(target.id);
 
-        await interaction.reply({
-            content: removed
-                ? `${target} больше не модератор экономики.`
+        return reply(interaction, {
+            description: removed
+                ? `${target} больше не модератор.`
                 : `${target} не был модератором.`,
             ephemeral: true
         });

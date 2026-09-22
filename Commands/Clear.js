@@ -1,13 +1,14 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { reply, error } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("clear")
-        .setDescription("Удалить сообщения в канале")
+        .setDescription("Удалить сообщения")
         .addIntegerOption(option =>
             option
                 .setName("amount")
-                .setDescription("Сколько сообщений")
+                .setDescription("Сколько")
                 .setRequired(true)
                 .setMinValue(1)
                 .setMaxValue(100)
@@ -17,39 +18,27 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
-            return interaction.reply({
-                content: "Нужно право Manage Messages.",
-                ephemeral: true
-            });
+            return error(interaction, "Нужно право Manage Messages.");
         }
 
         if (!interaction.channel?.bulkDelete) {
-            return interaction.reply({
-                content: "Здесь нельзя чистить сообщения.",
-                ephemeral: true
-            });
+            return error(interaction, "Здесь нельзя чистить.");
         }
 
         const amount = interaction.options.getInteger("amount");
 
         if (!Number.isInteger(amount) || amount < 1 || amount > 100) {
-            return interaction.reply({
-                content: "Укажи число сообщений от 1 до 100.",
-                ephemeral: true
-            });
+            return error(interaction, "От 1 до 100.");
         }
 
         try {
             const deleted = await interaction.channel.bulkDelete(amount, true);
-            await interaction.reply({
-                content: `Удалено **${deleted.size}** сообщений.`,
+            return reply(interaction, {
+                description: `Удалено **${deleted.size}**.`,
                 ephemeral: true
             });
         } catch {
-            await interaction.reply({
-                content: "Не получилось удалить. Сообщения старше 14 дней Discord не чистит пачкой.",
-                ephemeral: true
-            });
+            return error(interaction, "Не вышло. Сообщения старше 14 дней так не удалить.");
         }
     }
 };

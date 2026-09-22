@@ -1,31 +1,31 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { pick } = require("../Utils/random");
+const { reply, error } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("pick")
-        .setDescription("Выбрать один вариант через запятую")
+        .setDescription("Выбрать вариант через запятую")
         .addStringOption(option =>
             option
                 .setName("options")
-                .setDescription("Например: чай, кофе, какао")
+                .setDescription("чай, кофе, какао")
                 .setRequired(true)
                 .setMaxLength(300)
         ),
 
     async execute(interaction) {
-        const options = interaction.options.getString("options")
+        const options = (interaction.options.getString("options") ?? "")
             .split(",")
             .map(part => part.trim())
             .filter(Boolean);
 
         if (options.length < 2) {
-            return interaction.reply({
-                content: "Нужно хотя бы два варианта через запятую.",
-                ephemeral: true
-            });
+            return error(interaction, "Нужно хотя бы два варианта через запятую.");
         }
 
-        await interaction.reply(`Выбираю: **${pick(options)}**`);
+        return reply(interaction, {
+            description: `**${pick(options)}**`
+        });
     }
 };

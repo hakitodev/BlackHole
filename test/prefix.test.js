@@ -55,27 +55,40 @@ test("parseOptionValues: явное упоминание важнее ответ
 test("parseOptionValues: pay сумма, пользователь из ответа", () => {
     const parsed = parseOptionValues(["100"], {
         options: [
-            { type: 4, name: "amount", required: true },
+            { type: 3, name: "amount", required: true },
             { type: 6, name: "user" },
             { type: 3, name: "id" }
         ]
     }, "555");
 
-    assert.equal(parsed.values.amount.value, 100);
+    assert.equal(parsed.values.amount.value, "100");
     assert.equal(parsed.values.user.id, "555");
     assert.equal(parsed.values.id, null);
+});
+
+test("parseOptionValues: pay all из ответа", () => {
+    const parsed = parseOptionValues(["all"], {
+        options: [
+            { type: 3, name: "amount", required: true },
+            { type: 6, name: "user" },
+            { type: 3, name: "id" }
+        ]
+    }, "555");
+
+    assert.equal(parsed.values.amount.value, "all");
+    assert.equal(parsed.values.user.id, "555");
 });
 
 test("parseOptionValues: give из ответа и суммы", () => {
     const parsed = parseOptionValues(["250"], {
         options: [
             { type: 6, name: "user", required: true },
-            { type: 4, name: "amount", required: true }
+            { type: 3, name: "amount", required: true }
         ]
     }, "555");
 
     assert.equal(parsed.values.user.id, "555");
-    assert.equal(parsed.values.amount.value, 250);
+    assert.equal(parsed.values.amount.value, "250");
 });
 
 test("parseOptionValues: mod subcommand", () => {

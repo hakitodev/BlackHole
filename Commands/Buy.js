@@ -1,11 +1,12 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { get, find, list, format } = require("../Utils/shop");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("buy")
-        .setDescription("Купить предмет из магазина")
+        .setDescription("Купить предмет")
         .addStringOption(option =>
             option
                 .setName("item")
@@ -44,30 +45,22 @@ module.exports = {
         const item = find(itemId) ?? get(itemId);
 
         if (!item) {
-            return interaction.reply({
-                content: "Такого предмета нет. Смотри /shop.",
-                ephemeral: true
-            });
+            return error(interaction, "Такого предмета нет.");
         }
 
         if (!Number.isInteger(qty) || qty < 1 || qty > 20) {
-            return interaction.reply({
-                content: "Количество от 1 до 20.",
-                ephemeral: true
-            });
+            return error(interaction, "Количество от 1 до 20.");
         }
 
         const result = await economy.buyItem(interaction.user.id, item.id, item.price, qty);
 
         if (!result.ok) {
-            return interaction.reply({
-                content: `Нужно **${item.price * qty}** монет наличными.`,
-                ephemeral: true
-            });
+            return error(interaction, `Нужно **${item.price * qty}**.`);
         }
 
-        await interaction.reply(
-            `${interaction.user} купил ${format(item)} × **${qty}** за **${result.cost}** монет.`
-        );
+        return reply(interaction, {
+            color: COLOR.pink,
+            description: `${interaction.user} купил ${format(item)} × **${qty}** за **${result.cost}**`
+        });
     }
 };

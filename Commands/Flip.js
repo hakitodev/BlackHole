@@ -1,62 +1,54 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { remaining, hit, formatSeconds } = require("../Utils/cooldown");
+const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("flip")
-        .setDescription("Орёл или решка: удвоить ставку или потерять")
-        .addIntegerOption(option =>
+        .setDescription("Орёл или решка")
+        .addStringOption(option =>
             option
                 .setName("amount")
-                .setDescription("Ставка")
+                .setDescription("Ставка или all")
                 .setRequired(true)
-                .setMinValue(10)
-                .setMaxValue(10000)
         ),
-
     aliases: ["coinflip", "cf"],
 
     async execute(interaction) {
-        const amount = interaction.options.getInteger("amount");
+        const user = await economy.getUser(interaction.user.id);
+        const parsed = parseAmount(rawAmount(interaction), {
+            min: 10,
+            max: 10000,
+            available: user.balance
+        });
 
-        if (!Number.isInteger(amount) || amount < 10 || amount > 10000) {
-            return interaction.reply({
-                content: "Ставка от 10 до 10000.",
-                ephemeral: true
-            });
+        if (!parsed.ok) {
+            return error(interaction, amountMessage(parsed, { min: 10, max: 10000 }));
         }
 
         const key = `flip:${interaction.user.id}`;
         const wait = remaining(key);
 
         if (wait) {
-            return interaction.reply({
-                content: `Подожди ${formatSeconds(wait)} сек.`,
-                ephemeral: true
-            });
+            return error(interaction, `Подожди ${formatSeconds(wait)} сек.`);
         }
 
         const win = Math.random() < 0.5;
-        const result = await economy.flipBet(interaction.user.id, amount, win);
+        const result = await economy.flipBet(interaction.user.id, parsed.amount, win);
 
         if (!result.ok) {
-            return interaction.reply({
-                content: "Недостаточно наличных.",
-                ephemeral: true
-            });
+            return error(interaction, "Недостаточно наличных.");
         }
 
         hit(key, 4000);
 
-        if (result.win) {
-            return interaction.reply(
-                `Орёл! ${interaction.user} выиграл **${result.amount}** монет.`
-            );
-        }
-
-        await interaction.reply(
-            `Решка. ${interaction.user} проиграл **${result.amount}** монет.`
-        );
+        return reply(interaction, {
+            color: result.win ? COLOR.green : COLOR.red,
+            description: result.win
+                ? `Орёл. ${interaction.user} **+${result.amount}**`
+                : `Решка. ${interaction.user} **−${result.amount}**`
+        });
     }
 };

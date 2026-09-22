@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const { list } = require("../Utils/shop");
+const { reply, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -8,15 +9,13 @@ module.exports = {
 
     async execute(interaction) {
         const lines = list().map(item =>
-            `${item.emoji} **${item.name}** — ${item.price} монет\n${item.description}`
+            `${item.emoji} **${item.name}** — ${item.price}\n${item.description}`
         );
 
-        const embed = new EmbedBuilder()
-            .setColor(0xEB459E)
-            .setTitle("Магазин")
-            .setDescription(lines.join("\n\n"))
-            .setFooter({ text: "/buy чтобы купить" });
-
-        await interaction.reply({ embeds: [embed] });
+        return reply(interaction, {
+            color: COLOR.pink,
+            title: "Магазин",
+            description: lines.join("\n\n")
+        });
     }
 };

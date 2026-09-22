@@ -104,9 +104,9 @@ async function buildTopMessage(type, page) {
 
     const embed = new EmbedBuilder()
         .setColor(0xFEE75C)
-        .setTitle(state.type === "level" ? "Топ по уровню · все серверы" : "Топ богачей · все серверы")
+        .setTitle(state.type === "level" ? "Топ по уровню" : "Топ")
         .setDescription(lines.join("\n") || "Пока некого показывать.")
-        .setFooter({ text: `Страница ${state.page + 1}/${pages} · межгильдная экономика` });
+        .setFooter({ text: `${state.page + 1}/${pages}` });
 
     return {
         embeds: [embed],

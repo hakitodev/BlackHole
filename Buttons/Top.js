@@ -1,5 +1,6 @@
 const { parseTopId, nextState, buildTopMessage } = require("../Utils/top");
 const economy = require("../Database/Economy");
+const { embed, COLOR } = require("../Utils/reply");
 
 module.exports = {
     id: "top",
@@ -12,8 +13,7 @@ module.exports = {
 
         if (!payload) {
             return interaction.update({
-                content: "Пока некого показывать.",
-                embeds: [],
+                embeds: [embed({ description: "Пока некого показывать.", color: COLOR.red })],
                 components: []
             });
         }

@@ -4,6 +4,7 @@ const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const economy = require("./Database/Economy");
+const { payload } = require("./Utils/reply");
 const { runCommand, resolveCommand } = require("./Utils/runCommand");
 
 const client = new Client({
@@ -93,10 +94,11 @@ client.on("interactionCreate", async interaction => {
         const command = resolveCommand(client, interaction.commandName);
 
         if (!command) {
-            await interaction.reply({
-                content: "Эта команда устарела. Напиши `/` заново или перезапусти Discord.",
+            await interaction.reply(payload({
+                description: "Команда устарела. Напиши `/` заново.",
+                color: 0xED4245,
                 ephemeral: true
-            });
+            }));
             return;
         }
 
@@ -113,10 +115,11 @@ client.on("interactionCreate", async interaction => {
         } catch (error) {
             console.error(error);
 
-            const reply = {
-                content: "Произошла ошибка при выполнении команды.",
+            const reply = payload({
+                description: "Не удалось выполнить команду.",
+                color: 0xED4245,
                 ephemeral: true
-            };
+            });
 
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp(reply).catch(() => {});

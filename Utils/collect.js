@@ -123,12 +123,8 @@ function formatPart(part) {
 }
 
 function formatCollect(result) {
-    const header = result.claimed
-        ? "Сбор:"
-        : "Пока нечего собирать.";
     const levelUp = result.level ? `\nНовый уровень: **${result.level}**` : "";
-
-    return `${header}\n${result.parts.map(formatPart).join("\n")}${levelUp}`;
+    return `${result.parts.map(formatPart).join("\n")}${levelUp}`;
 }
 
 module.exports = {

@@ -1,21 +1,21 @@
 const {
     SlashCommandBuilder,
-    EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
     PermissionFlagsBits
 } = require("discord.js");
 const { roleError } = require("../Utils/roles");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("authpanel")
-        .setDescription("Создать панель выдачи роли")
+        .setDescription("Панель выдачи роли")
         .addRoleOption(option =>
             option
                 .setName("role")
-                .setDescription("Роль, которую получит пользователь")
+                .setDescription("Роль")
                 .setRequired(true)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
@@ -23,27 +23,18 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.inGuild()) {
-            return interaction.reply({
-                content: "Команду можно использовать только на сервере.",
-                ephemeral: true
-            });
+            return error(interaction, "Только на сервере.");
         }
 
         if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageRoles)) {
-            return interaction.reply({
-                content: "Нужно право Manage Roles.",
-                ephemeral: true
-            });
+            return error(interaction, "Нужно право Manage Roles.");
         }
 
         const role = interaction.options.getRole("role");
-        const error = roleError(role, interaction.member, interaction.guild.members.me);
+        const problem = roleError(role, interaction.member, interaction.guild.members.me);
 
-        if (error) {
-            return interaction.reply({
-                content: error,
-                ephemeral: true
-            });
+        if (problem) {
+            return error(interaction, problem);
         }
 
         const button = new ButtonBuilder()
@@ -52,18 +43,11 @@ module.exports = {
             .setStyle(ButtonStyle.Secondary)
             .setEmoji("🍀");
 
-        const row = new ActionRowBuilder().addComponents(button);
-
-        const embed = new EmbedBuilder()
-            .setColor(0x57F287)
-            .setTitle("Авторизация")
-            .setDescription(
-                `Нажми кнопку ниже, чтобы получить роль ${role}.\nClick the button below to get access.`
-            );
-
-        await interaction.reply({
-            embeds: [embed],
-            components: [row]
+        return reply(interaction, {
+            color: COLOR.green,
+            title: "Авторизация",
+            description: `Нажми, чтобы получить ${role}.`,
+            components: [new ActionRowBuilder().addComponents(button)]
         });
     }
 };

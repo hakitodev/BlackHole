@@ -40,7 +40,7 @@ test("collect: забирает daily, work и crime разом", async () => {
         .reduce((sum, part) => sum + part.amount, 0);
 
     assert.equal(result.balance, expected);
-    assert.match(formatCollect(result), /Сбор:/);
+    assert.match(formatCollect(result), /Ежедневка/);
 });
 
 test("collect: повторно не выдаёт, пока кулдаун", async () => {
@@ -50,7 +50,7 @@ test("collect: повторно не выдаёт, пока кулдаун", asy
 
     assert.equal(again.claimed, false);
     assert.equal(again.parts.every(part => !part.ok), true);
-    assert.match(formatCollect(again), /нечего собирать/);
+    assert.match(formatCollect(again), /через/);
 });
 
 test("collect: провал crime не отменяет daily и work", async () => {

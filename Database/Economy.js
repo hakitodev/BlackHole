@@ -95,6 +95,13 @@ async function initDatabase(filename) {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS guilds (
+            id TEXT PRIMARY KEY,
+            prefix INTEGER NOT NULL DEFAULT 1
+        );
+    `);
+
     await ensureColumns();
 }
 
@@ -589,6 +596,32 @@ async function listStaff() {
     return db.all("SELECT user_id, added_by, added_at FROM staff ORDER BY added_at ASC");
 }
 
+async function isPrefixEnabled(guildId) {
+    if (!guildId) {
+        return true;
+    }
+
+    const row = await db.get(
+        "SELECT prefix FROM guilds WHERE id = ?",
+        String(guildId)
+    );
+
+    if (!row) {
+        return true;
+    }
+
+    return Number(row.prefix) !== 0;
+}
+
+async function setPrefixEnabled(guildId, enabled) {
+    await db.run(
+        `INSERT INTO guilds(id, prefix) VALUES(?, ?)
+         ON CONFLICT(id) DO UPDATE SET prefix = excluded.prefix`,
+        String(guildId),
+        enabled ? 1 : 0
+    );
+}
+
 module.exports = {
     initDatabase,
     closeDatabase,
@@ -614,5 +647,7 @@ module.exports = {
     addStaff,
     removeStaff,
     listStaff,
+    isPrefixEnabled,
+    setPrefixEnabled,
     neededXp
 };

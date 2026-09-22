@@ -1,13 +1,16 @@
+const { payload } = require("./reply");
+
 async function runCommand(command, interaction) {
     try {
         await command.execute(interaction);
     } catch (error) {
         console.error(error);
 
-        const reply = {
-            content: "Произошла ошибка при выполнении команды.",
+        const reply = payload({
+            description: "Не удалось выполнить команду.",
+            color: 0xED4245,
             ephemeral: true
-        };
+        });
 
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp(reply).catch(() => {});

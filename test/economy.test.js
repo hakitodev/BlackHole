@@ -298,3 +298,27 @@ test("getTop: страницы по offset", async () => {
     assert.ok(page1.some(user => user.id === ids[10]));
     assert.ok((await economy.countUsers()) >= 12);
 });
+
+test("deposit/withdraw all через полный баланс", async () => {
+    const id = uid("all");
+    await economy.addBalance(id, 400);
+
+    assert.equal((await economy.deposit(id, 400)).ok, true);
+    assert.equal(await cash(id), 0);
+    assert.equal((await economy.getUser(id)).bank, 400);
+
+    assert.equal((await economy.withdraw(id, 400)).ok, true);
+    assert.equal(await cash(id), 400);
+    assert.equal((await economy.getUser(id)).bank, 0);
+});
+
+test("префикс на сервере по умолчанию включён и выключается", async () => {
+    const guild = "guild-1";
+    assert.equal(await economy.isPrefixEnabled(guild), true);
+
+    await economy.setPrefixEnabled(guild, false);
+    assert.equal(await economy.isPrefixEnabled(guild), false);
+
+    await economy.setPrefixEnabled(guild, true);
+    assert.equal(await economy.isPrefixEnabled(guild), true);
+});

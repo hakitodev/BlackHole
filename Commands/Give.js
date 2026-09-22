@@ -1,24 +1,24 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { requireStaff } = require("../Utils/staff");
+const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("give")
-        .setDescription("Выдать монеты. Общий кошелёк на все серверы")
+        .setDescription("Выдать монеты")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Получатель. Или ответь на сообщение")
+                .setDescription("Получатель или ответ на сообщение")
                 .setRequired(true)
         )
-        .addIntegerOption(option =>
+        .addStringOption(option =>
             option
                 .setName("amount")
                 .setDescription("Сумма")
                 .setRequired(true)
-                .setMinValue(1)
-                .setMaxValue(1000000)
         ),
 
     async execute(interaction) {
@@ -27,33 +27,25 @@ module.exports = {
         }
 
         const target = interaction.options.getUser("user");
-        const amount = interaction.options.getInteger("amount");
+        const parsed = parseAmount(rawAmount(interaction), { max: 1000000 });
 
         if (!target) {
-            return interaction.reply({
-                content: "Укажи пользователя или ответь на его сообщение.",
-                ephemeral: true
-            });
+            return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
-        if (!Number.isInteger(amount) || amount < 1) {
-            return interaction.reply({
-                content: "Укажи сумму.",
-                ephemeral: true
-            });
+        if (!parsed.ok || parsed.all) {
+            return error(interaction, parsed.all ? "Укажи сумму." : amountMessage(parsed, { max: 1000000 }));
         }
 
         if (target.bot) {
-            return interaction.reply({
-                content: "Нельзя выдавать монеты ботам.",
-                ephemeral: true
-            });
+            return error(interaction, "Нельзя выдавать ботам.");
         }
 
-        await economy.addBalance(target.id, amount);
+        await economy.addBalance(target.id, parsed.amount);
 
-        await interaction.reply(
-            `${interaction.user} выдал ${target} **${amount}** монет. Баланс общий на всех серверах.`
-        );
+        return reply(interaction, {
+            color: COLOR.gold,
+            description: `${interaction.user} выдал ${target} **${parsed.amount}**`
+        });
     }
 };

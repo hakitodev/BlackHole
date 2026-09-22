@@ -1,4 +1,5 @@
 const { PREFIX } = require("../Config");
+const economy = require("../Database/Economy");
 const { stripPrefix, splitCommand } = require("../Utils/prefix");
 const { createMessageContext } = require("../Utils/messageCommand");
 const { runCommand, resolveCommand } = require("../Utils/runCommand");
@@ -20,6 +21,10 @@ module.exports = {
     name: "messageCreate",
     async execute(client, message) {
         if (message.author.bot) {
+            return;
+        }
+
+        if (message.guild && !(await economy.isPrefixEnabled(message.guild.id))) {
             return;
         }
 

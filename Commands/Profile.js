@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { isOwner } = require("../Utils/staff");
+const { reply, COLOR } = require("../Utils/reply");
 
 function bar(xp, need) {
     const size = 10;
@@ -11,11 +12,11 @@ function bar(xp, need) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("profile")
-        .setDescription("Профиль. Деньги и уровень общие на все серверы")
+        .setDescription("Профиль")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь. Или ответь на сообщение")
+                .setDescription("Пользователь или ответ на сообщение")
         ),
 
     async execute(interaction) {
@@ -23,33 +24,33 @@ module.exports = {
         const user = await economy.getUser(member.id);
         const need = economy.neededXp(user.level);
         const role = isOwner({ client: interaction.client, user: member })
-            ? "Владелец бота"
+            ? "Владелец"
             : await economy.isStaff(member.id)
-                ? "Модератор экономики"
+                ? "Модер"
                 : null;
 
-        const embed = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle(member.username)
-            .setThumbnail(member.displayAvatarURL({ size: 256 }))
-            .addFields(
-                {
-                    name: "Деньги",
-                    value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nВсего: **${user.balance + user.bank}**`,
-                    inline: true
-                },
-                {
-                    name: "Прогресс",
-                    value: `Уровень **${user.level}**\n${bar(user.xp, need)} ${user.xp}/${need} XP`,
-                    inline: true
-                }
-            )
-            .setFooter({ text: "Один кошелёк и уровень на все серверы бота" });
+        const fields = [
+            {
+                name: "Деньги",
+                value: `Наличные: **${user.balance}**\nБанк: **${user.bank}**\nВсего: **${user.balance + user.bank}**`,
+                inline: true
+            },
+            {
+                name: "Уровень",
+                value: `**${user.level}**\n${bar(user.xp, need)} ${user.xp}/${need}`,
+                inline: true
+            }
+        ];
 
         if (role) {
-            embed.addFields({ name: "Статус", value: role, inline: true });
+            fields.push({ name: "Статус", value: role, inline: true });
         }
 
-        await interaction.reply({ embeds: [embed] });
+        return reply(interaction, {
+            color: COLOR.blurple,
+            title: member.username,
+            thumbnail: member.displayAvatarURL({ size: 256 }),
+            fields
+        });
     }
 };

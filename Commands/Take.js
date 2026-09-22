@@ -1,24 +1,24 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { requireStaff } = require("../Utils/staff");
+const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("take")
-        .setDescription("Забрать монеты. Сначала наличные, потом банк")
+        .setDescription("Забрать монеты")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("У кого забрать. Или ответь на сообщение")
+                .setDescription("У кого забрать или ответ на сообщение")
                 .setRequired(true)
         )
-        .addIntegerOption(option =>
+        .addStringOption(option =>
             option
                 .setName("amount")
-                .setDescription("Сумма")
+                .setDescription("Сумма или all")
                 .setRequired(true)
-                .setMinValue(1)
-                .setMaxValue(1000000)
         ),
 
     async execute(interaction) {
@@ -27,40 +27,34 @@ module.exports = {
         }
 
         const target = interaction.options.getUser("user");
-        const amount = interaction.options.getInteger("amount");
 
         if (!target) {
-            return interaction.reply({
-                content: "Укажи пользователя или ответь на его сообщение.",
-                ephemeral: true
-            });
-        }
-
-        if (!Number.isInteger(amount) || amount < 1) {
-            return interaction.reply({
-                content: "Укажи сумму.",
-                ephemeral: true
-            });
+            return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
         if (target.bot) {
-            return interaction.reply({
-                content: "У ботов нет кошелька.",
-                ephemeral: true
-            });
+            return error(interaction, "У ботов нет кошелька.");
         }
 
-        const result = await economy.takeBalance(target.id, amount);
+        const user = await economy.getUser(target.id);
+        const parsed = parseAmount(rawAmount(interaction), {
+            max: 1000000,
+            available: user.balance + user.bank
+        });
+
+        if (!parsed.ok) {
+            return error(interaction, amountMessage(parsed, { max: 1000000 }));
+        }
+
+        const result = await economy.takeBalance(target.id, parsed.amount);
 
         if (!result.ok) {
-            return interaction.reply({
-                content: `Недостаточно денег. Всего у ${target}: **${result.total}**.`,
-                ephemeral: true
-            });
+            return error(interaction, `Всего у ${target}: **${result.total}**.`);
         }
 
-        await interaction.reply(
-            `${interaction.user} забрал у ${target} **${result.amount}** монет.`
-        );
+        return reply(interaction, {
+            color: COLOR.gold,
+            description: `${interaction.user} забрал у ${target} **${result.amount}**`
+        });
     }
 };

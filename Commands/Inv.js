@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { get, format } = require("../Utils/shop");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -9,7 +10,7 @@ module.exports = {
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь. Или ответь на сообщение")
+                .setDescription("Пользователь или ответ на сообщение")
         ),
 
     async execute(interaction) {
@@ -17,12 +18,12 @@ module.exports = {
         const rows = await economy.getInventory(member.id);
 
         if (!rows.length) {
-            return interaction.reply({
-                content: member.id === interaction.user.id
-                    ? "Инвентарь пуст. Загляни в /shop."
-                    : `У **${member.username}** пустой инвентарь.`,
-                ephemeral: true
-            });
+            return error(
+                interaction,
+                member.id === interaction.user.id
+                    ? "Пусто."
+                    : `У **${member.username}** пусто.`
+            );
         }
 
         const lines = rows.map(row => {
@@ -31,11 +32,10 @@ module.exports = {
             return `${label} — **${row.qty}**`;
         });
 
-        const embed = new EmbedBuilder()
-            .setColor(0xEB459E)
-            .setTitle(`Инвентарь ${member.username}`)
-            .setDescription(lines.join("\n"));
-
-        await interaction.reply({ embeds: [embed] });
+        return reply(interaction, {
+            color: COLOR.pink,
+            title: member.username,
+            description: lines.join("\n")
+        });
     }
 };

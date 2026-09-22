@@ -1,37 +1,37 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
+const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("dep")
         .setDescription("Положить деньги в банк")
-        .addIntegerOption(option =>
+        .addStringOption(option =>
             option
                 .setName("amount")
-                .setDescription("Сумма")
+                .setDescription("Сумма или all")
                 .setRequired(true)
-                .setMinValue(1)
         ),
+    aliases: ["deposit"],
 
     async execute(interaction) {
-        const amount = interaction.options.getInteger("amount");
+        const user = await economy.getUser(interaction.user.id);
+        const parsed = parseAmount(rawAmount(interaction), { available: user.balance });
 
-        if (!Number.isInteger(amount) || amount < 1) {
-            return interaction.reply({
-                content: "Укажи сумму.",
-                ephemeral: true
-            });
+        if (!parsed.ok) {
+            return error(interaction, amountMessage(parsed));
         }
 
-        const result = await economy.deposit(interaction.user.id, amount);
+        const result = await economy.deposit(interaction.user.id, parsed.amount);
 
         if (!result.ok) {
-            return interaction.reply({
-                content: "Недостаточно наличных.",
-                ephemeral: true
-            });
+            return error(interaction, "Недостаточно наличных.");
         }
 
-        await interaction.reply(`В банк положено **${amount}** монет.`);
+        return reply(interaction, {
+            color: COLOR.gold,
+            description: `В банк: **${parsed.amount}**`
+        });
     }
 };

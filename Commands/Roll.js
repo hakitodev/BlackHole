@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { integer } = require("../Utils/random");
+const { reply } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -15,6 +16,8 @@ module.exports = {
 
     async execute(interaction) {
         const max = interaction.options.getInteger("max") ?? 6;
-        await interaction.reply(`Выпало **${integer(1, max)}** из ${max}`);
+        return reply(interaction, {
+            description: `**${integer(1, max)}** / ${max}`
+        });
     }
 };

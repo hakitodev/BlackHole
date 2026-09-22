@@ -1,5 +1,6 @@
 const { OWNER_ID } = require("../Config");
 const economy = require("../Database/Economy");
+const { error } = require("./reply");
 
 function ownerIds(client) {
     const ids = new Set();
@@ -49,10 +50,7 @@ async function requireOwner(interaction) {
         return true;
     }
 
-    await interaction.reply({
-        content: "Только владелец бота может назначать модераторов.",
-        ephemeral: true
-    });
+    await error(interaction, "Только владелец бота может назначать модераторов.");
     return false;
 }
 
@@ -61,10 +59,7 @@ async function requireStaff(interaction) {
         return true;
     }
 
-    await interaction.reply({
-        content: "Нужно быть владельцем или модератором экономики.",
-        ephemeral: true
-    });
+    await error(interaction, "Нужно быть владельцем или модератором.");
     return false;
 }
 

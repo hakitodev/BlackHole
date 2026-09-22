@@ -1,9 +1,10 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { reply, error } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("slowmode")
-        .setDescription("Медленный режим канала")
+        .setDescription("Медленный режим")
         .addIntegerOption(option =>
             option
                 .setName("seconds")
@@ -17,41 +18,29 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
-            return interaction.reply({
-                content: "Нужно право Manage Channels.",
-                ephemeral: true
-            });
+            return error(interaction, "Нужно право Manage Channels.");
         }
 
         if (!interaction.channel?.setRateLimitPerUser) {
-            return interaction.reply({
-                content: "В этом канале медленный режим недоступен.",
-                ephemeral: true
-            });
+            return error(interaction, "Здесь недоступно.");
         }
 
         const seconds = interaction.options.getInteger("seconds");
 
         if (seconds == null || seconds < 0 || seconds > 21600) {
-            return interaction.reply({
-                content: "Укажи секунды от 0 до 21600.",
-                ephemeral: true
-            });
+            return error(interaction, "Секунды от 0 до 21600.");
         }
 
         try {
             await interaction.channel.setRateLimitPerUser(seconds);
         } catch {
-            return interaction.reply({
-                content: "Не удалось поставить медленный режим.",
-                ephemeral: true
-            });
+            return error(interaction, "Не удалось поставить.");
         }
 
-        await interaction.reply(
-            seconds
-                ? `Медленный режим: **${seconds}** сек.`
-                : "Медленный режим выключен."
-        );
+        return reply(interaction, {
+            description: seconds
+                ? `**${seconds}** сек.`
+                : "Выключен."
+        });
     }
 };

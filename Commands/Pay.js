@@ -1,6 +1,8 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { remaining, hit, formatSeconds } = require("../Utils/cooldown");
+const { rawAmount, parseAmount, amountMessage } = require("../Utils/amount");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 async function resolveTarget(interaction) {
     const selected = interaction.options.getUser("user");
@@ -23,73 +25,55 @@ async function resolveTarget(interaction) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("pay")
-        .setDescription("Перевести деньги. Кошелёк общий на все серверы")
-        .addIntegerOption(option =>
+        .setDescription("Перевести наличные")
+        .addStringOption(option =>
             option
                 .setName("amount")
-                .setDescription("Сумма")
+                .setDescription("Сумма или all")
                 .setRequired(true)
-                .setMinValue(1)
         )
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Получатель на этом сервере. Или ответь на сообщение")
+                .setDescription("Получатель или ответ на сообщение")
         )
         .addStringOption(option =>
             option
                 .setName("id")
-                .setDescription("Discord ID, если человека нет на этом сервере")
+                .setDescription("Discord ID")
         ),
 
     async execute(interaction) {
         const target = await resolveTarget(interaction);
 
         if (target === false) {
-            return interaction.reply({
-                content: "Неверный ID или пользователь не найден.",
-                ephemeral: true
-            });
+            return error(interaction, "Пользователь не найден.");
         }
 
         if (!target) {
-            return interaction.reply({
-                content: "Укажи пользователя, его Discord ID или ответь на сообщение.",
-                ephemeral: true
-            });
-        }
-
-        const amount = interaction.options.getInteger("amount");
-
-        if (!Number.isInteger(amount) || amount < 1) {
-            return interaction.reply({
-                content: "Укажи сумму.",
-                ephemeral: true
-            });
+            return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
         if (target.bot) {
-            return interaction.reply({
-                content: "Нельзя переводить ботам.",
-                ephemeral: true
-            });
+            return error(interaction, "Нельзя переводить ботам.");
         }
 
         if (target.id === interaction.user.id) {
-            return interaction.reply({
-                content: "Нельзя перевести деньги самому себе.",
-                ephemeral: true
-            });
+            return error(interaction, "Нельзя перевести себе.");
+        }
+
+        const user = await economy.getUser(interaction.user.id);
+        const parsed = parseAmount(rawAmount(interaction), { available: user.balance });
+
+        if (!parsed.ok) {
+            return error(interaction, amountMessage(parsed));
         }
 
         const key = `pay:${interaction.user.id}`;
         const wait = remaining(key);
 
         if (wait) {
-            return interaction.reply({
-                content: `Подожди ${formatSeconds(wait)} сек.`,
-                ephemeral: true
-            });
+            return error(interaction, `Подожди ${formatSeconds(wait)} сек.`);
         }
 
         hit(key, 3000);
@@ -97,18 +81,16 @@ module.exports = {
         const result = await economy.transfer(
             interaction.user.id,
             target.id,
-            amount
+            parsed.amount
         );
 
         if (!result.ok) {
-            return interaction.reply({
-                content: "Недостаточно наличных. Деньги в банке сначала сними через /with.",
-                ephemeral: true
-            });
+            return error(interaction, "Недостаточно наличных.");
         }
 
-        await interaction.reply(
-            `${interaction.user} перевёл **${amount}** монет ${target}. Баланс общий на всех серверах.`
-        );
+        return reply(interaction, {
+            color: COLOR.gold,
+            description: `${interaction.user} перевёл **${parsed.amount}** ${target}`
+        });
     }
 };

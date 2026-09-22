@@ -2,17 +2,18 @@ const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
 const { integer } = require("../Utils/random");
 const { formatDuration } = require("../Utils/time");
+const { reply, error, COLOR } = require("../Utils/reply");
 
 const COOLDOWN = 90 * 60 * 1000;
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("rob")
-        .setDescription("Украсть наличные у другого игрока")
+        .setDescription("Украсть наличные")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Жертва. Или ответь на сообщение")
+                .setDescription("Жертва или ответ на сообщение")
                 .setRequired(true)
         ),
     aliases: ["steal"],
@@ -21,33 +22,21 @@ module.exports = {
         const target = interaction.options.getUser("user");
 
         if (!target) {
-            return interaction.reply({
-                content: "Укажи пользователя или ответь на его сообщение.",
-                ephemeral: true
-            });
+            return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
         if (target.bot) {
-            return interaction.reply({
-                content: "Ботов грабить бессмысленно.",
-                ephemeral: true
-            });
+            return error(interaction, "Ботов грабить бессмысленно.");
         }
 
         if (target.id === interaction.user.id) {
-            return interaction.reply({
-                content: "Нельзя ограбить самого себя.",
-                ephemeral: true
-            });
+            return error(interaction, "Нельзя ограбить себя.");
         }
 
         const victim = await economy.getUser(target.id);
 
         if (victim.balance < 50) {
-            return interaction.reply({
-                content: "У этого человека почти нет наличных. Деньги в банке не украсть.",
-                ephemeral: true
-            });
+            return error(interaction, "Мало наличных. Банк не украсть.");
         }
 
         const success = Math.random() < 0.35;
@@ -64,34 +53,31 @@ module.exports = {
         );
 
         if (!result.ok && result.reason === "cooldown") {
-            return interaction.reply({
-                content: `Подожди ${formatDuration(result.nextAt - Date.now())}.`,
-                ephemeral: true
-            });
+            return error(interaction, `Подожди ${formatDuration(result.nextAt - Date.now())}.`);
         }
 
         if (!result.ok) {
-            return interaction.reply({
-                content: "У цели нечего брать с наличных.",
-                ephemeral: true
-            });
+            return error(interaction, "Нечего брать.");
         }
 
         if (result.success) {
-            const levelUp = result.leveled ? `\nНовый уровень: **${result.level}**` : "";
-            return interaction.reply(
-                `${interaction.user} украл **${result.amount}** монет у ${target}.${levelUp}`
-            );
+            const levelUp = result.leveled ? `\nУровень **${result.level}**` : "";
+            return reply(interaction, {
+                color: COLOR.green,
+                description: `${interaction.user} украл **${result.amount}** у ${target}${levelUp}`
+            });
         }
 
         if (result.wiped) {
-            return interaction.reply(
-                `${interaction.user} попался на ограблении ${target}. Забрали все наличные.`
-            );
+            return reply(interaction, {
+                color: COLOR.red,
+                description: `${interaction.user} попался на ${target}. Забрали все наличные.`
+            });
         }
 
-        await interaction.reply(
-            `${interaction.user} попался. Компенсация ${target}: **${result.amount}** монет.`
-        );
+        return reply(interaction, {
+            color: COLOR.red,
+            description: `${interaction.user} попался. ${target} получил **${result.amount}**`
+        });
     }
 };

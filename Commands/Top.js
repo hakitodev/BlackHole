@@ -1,10 +1,11 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { normalizeTopType, buildTopMessage } = require("../Utils/top");
+const { error } = require("../Utils/reply");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("top")
-        .setDescription("Топ по всем серверам бота")
+        .setDescription("Топ")
         .addStringOption(option =>
             option
                 .setName("type")
@@ -21,10 +22,7 @@ module.exports = {
         const payload = await buildTopMessage(type, 0);
 
         if (!payload) {
-            return interaction.reply({
-                content: "Пока некого показывать.",
-                ephemeral: true
-            });
+            return error(interaction, "Пока некого показывать.");
         }
 
         await interaction.reply(payload);

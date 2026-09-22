@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
+const { reply, COLOR } = require("../Utils/reply");
 
 function stamp(date) {
     const unix = Math.floor(date.getTime() / 1000);
@@ -8,11 +9,11 @@ function stamp(date) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("user")
-        .setDescription("Информация о пользователе")
+        .setDescription("Пользователь")
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь. Или ответь на сообщение")
+                .setDescription("Пользователь или ответ на сообщение")
         ),
 
     async execute(interaction) {
@@ -21,17 +22,13 @@ module.exports = {
             ? await interaction.guild.members.fetch(user.id).catch(() => null)
             : null;
 
-        const embed = new EmbedBuilder()
-            .setColor(member?.displayColor || 0x5865F2)
-            .setTitle(user.username)
-            .setThumbnail(user.displayAvatarURL({ size: 256 }))
-            .addFields(
-                { name: "ID", value: user.id, inline: true },
-                { name: "Аккаунт", value: stamp(user.createdAt), inline: true }
-            );
+        const fields = [
+            { name: "ID", value: user.id, inline: true },
+            { name: "Аккаунт", value: stamp(user.createdAt), inline: true }
+        ];
 
         if (member?.joinedAt) {
-            embed.addFields({ name: "На сервере", value: stamp(member.joinedAt), inline: true });
+            fields.push({ name: "Зашёл", value: stamp(member.joinedAt), inline: true });
         }
 
         if (member) {
@@ -41,12 +38,17 @@ module.exports = {
                 .map(role => role.toString())
                 .slice(0, 15);
 
-            embed.addFields({
+            fields.push({
                 name: `Роли (${member.roles.cache.size - 1})`,
-                value: roles.join(" ") || "Нет"
+                value: roles.join(" ") || "—"
             });
         }
 
-        await interaction.reply({ embeds: [embed] });
+        return reply(interaction, {
+            color: member?.displayColor || COLOR.blurple,
+            title: user.username,
+            thumbnail: user.displayAvatarURL({ size: 256 }),
+            fields
+        });
     }
 };
