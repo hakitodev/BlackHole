@@ -23,7 +23,7 @@ function roleError(role, member, me) {
     }
 
     if (role.managed) {
-        return "Эту роль выдаёт интеграция, бот не может её назначить.";
+        return "Эту роль выдаёт интеграция, я не могу её назначить.";
     }
 
     if (DANGEROUS_PERMISSIONS.some(permission => role.permissions.has(permission))) {
@@ -35,11 +35,11 @@ function roleError(role, member, me) {
     }
 
     if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-        return "У бота нет права Manage Roles.";
+        return "У меня нет права Manage Roles.";
     }
 
     if (me.roles.highest.comparePositionTo(role) <= 0) {
-        return "Эта роль выше или равна роли бота.";
+        return "Эта роль выше или равна моей роли.";
     }
 
     if (

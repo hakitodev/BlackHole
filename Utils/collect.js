@@ -2,7 +2,7 @@ const economy = require("../Database/Economy");
 const { integer, pick } = require("./random");
 const { formatDuration } = require("./time");
 
-const DAILY_REWARD = 500;
+const DAILY_REWARD = 100 + integer(200, 1000);
 const DAILY_COOLDOWN = 24 * 60 * 60 * 1000;
 const WORK_COOLDOWN = 45 * 60 * 1000;
 const CRIME_COOLDOWN = 2 * 60 * 60 * 1000;
@@ -12,6 +12,7 @@ const JOBS = [
     { text: "развёз заказы", min: 90, max: 200 },
     { text: "починил кому-то компьютер", min: 120, max: 260 },
     { text: "постоял на ресепшене", min: 70, max: 160 },
+    { text: "наколол дрова кому-то", min: 70, max: 160 },
     { text: "помог с переездом", min: 110, max: 240 }
 ];
 
@@ -19,6 +20,9 @@ const CRIMES = [
     "ограбил ларёк",
     "взломал автомат",
     "утащил посылку",
+    "стащил кошелек",
+    "угнал велик",
+    "угнал самокат",
     "снял магнитолу"
 ];
 

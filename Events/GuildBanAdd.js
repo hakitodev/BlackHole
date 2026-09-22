@@ -10,7 +10,7 @@ module.exports = {
             embeds: [
                 new EmbedBuilder()
                     .setColor(0xED4245)
-                    .setDescription(`Бан: **${ban.user.tag}**\n${ban.reason || "без причины"}`)
+                    .setDescription(`Бан: **${ban.user.tag}**\n${ban.reason || "причина отсутствует"}`)
             ]
         });
     }
