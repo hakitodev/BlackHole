@@ -2,7 +2,7 @@ function snowflake(value) {
     return String(value ?? "").replace(/\D/g, "").slice(0, 20);
 }
 
-function parseIdList(raw, max = 8) {
+function parseIdList(raw, max = 10000) {
     const parts = Array.isArray(raw) ? raw : String(raw ?? "").split(/[,\s]+/);
     const ids = [];
     const seen = new Set();

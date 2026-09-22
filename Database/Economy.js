@@ -252,12 +252,8 @@ async function ensureGuildColumns() {
         automod_invites: "INTEGER NOT NULL DEFAULT 0",
         automod_words: "TEXT",
         disabled_commands: "TEXT",
-        flip_max: "INTEGER NOT NULL DEFAULT 10000",
-        flip_min: "INTEGER NOT NULL DEFAULT 10",
-        pay_max: "INTEGER NOT NULL DEFAULT 0",
-        pay_min: "INTEGER NOT NULL DEFAULT 1",
-        rob_min: "INTEGER NOT NULL DEFAULT 50",
-        buy_max: "INTEGER NOT NULL DEFAULT 20"
+        xp_on: "INTEGER NOT NULL DEFAULT 1",
+        level_money: "INTEGER NOT NULL DEFAULT 250"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -283,7 +279,14 @@ async function ensureCustomCommandColumns() {
         color: "TEXT",
         image: "TEXT",
         thumbnail: "TEXT",
-        footer: "TEXT"
+        footer: "TEXT",
+        content: "TEXT",
+        author: "TEXT",
+        author_icon: "TEXT",
+        url: "TEXT",
+        footer_icon: "TEXT",
+        fields: "TEXT",
+        timestamp: "INTEGER NOT NULL DEFAULT 0"
     };
     for (const [name, definition] of Object.entries(required)) {
         if (!names.has(name)) {
@@ -364,34 +367,38 @@ async function getUser(id) {
     return asUser(row, userId);
 }
 
-async function applyLevelUps(id) {
+async function applyLevelUps(id, moneyPerLevel = 250) {
     const user = await db.get("SELECT xp, level FROM users WHERE id = ?", id);
     let xp = Number(user?.xp) || 0;
     let level = Number(user?.level) || 1;
     let leveled = 0;
+    const payout = Math.max(0, Number(moneyPerLevel) || 0);
 
-    while (xp >= neededXp(level) && level < 1000) {
+    while (xp >= neededXp(level) && level < 10000) {
         xp -= neededXp(level);
         level += 1;
         leveled += 1;
     }
 
     if (leveled) {
+        const money = payout * leveled;
         await db.run(
-            "UPDATE users SET xp = ?, level = ? WHERE id = ?",
+            "UPDATE users SET xp = ?, level = ?, balance = balance + ? WHERE id = ?",
             xp,
             level,
+            money,
             id
         );
+        return { xp, level, leveled, money };
     }
 
-    return { xp, level, leveled };
+    return { xp, level, leveled: 0, money: 0 };
 }
 
-async function addXp(id, amount) {
+async function addXp(id, amount, moneyPerLevel = 250) {
     await getUser(id);
     await db.run("UPDATE users SET xp = xp + ? WHERE id = ?", amount, id);
-    return applyLevelUps(id);
+    return applyLevelUps(id, moneyPerLevel);
 }
 
 async function addBalance(id, amount) {
@@ -519,11 +526,11 @@ async function commitCrime(id, cooldownMs, success, payout, fine, xpGain = 20) {
     });
 }
 
-async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCash = 50) {
+async function attemptRob(fromId, toId, cooldownMs, success, steal, fine, minCash = 1) {
     await getUser(fromId);
     await getUser(toId);
     const now = Date.now();
-    const need = Math.max(1, Number(minCash) || 50);
+        const need = Math.max(1, Number(minCash) || 1);
 
     return withTransaction(async () => {
         const target = await db.get("SELECT balance FROM users WHERE id = ?", toId);
@@ -1100,22 +1107,67 @@ async function deleteShopItem(scope, id) {
 }
 
 async function setWallet(id, patch = {}) {
+    return setUser(id, patch);
+}
+
+async function setUser(id, patch = {}) {
     await getUser(id);
-    if (patch.balance !== undefined) {
-        await db.run(
-            "UPDATE users SET balance = ? WHERE id = ?",
-            Math.max(0, Math.min(1e12, Math.floor(Number(patch.balance) || 0))),
-            String(id)
-        );
-    }
-    if (patch.bank !== undefined) {
-        await db.run(
-            "UPDATE users SET bank = ? WHERE id = ?",
-            Math.max(0, Math.min(1e12, Math.floor(Number(patch.bank) || 0))),
-            String(id)
-        );
+    const map = {
+        balance: "balance",
+        bank: "bank",
+        xp: "xp",
+        level: "level",
+        daily: "daily",
+        work: "work",
+        crime: "crime",
+        rob: "rob"
+    };
+    for (const [key, column] of Object.entries(map)) {
+        if (patch[key] === undefined) {
+            continue;
+        }
+        const value = Math.max(0, Math.min(1e12, Math.floor(Number(patch[key]) || 0)));
+        await db.run(`UPDATE users SET ${column} = ? WHERE id = ?`, value, String(id));
     }
     return getUser(id);
+}
+
+async function resetCooldowns(id) {
+    await getUser(id);
+    await db.run(
+        "UPDATE users SET daily = 0, work = 0, crime = 0, rob = 0 WHERE id = ?",
+        String(id)
+    );
+    return getUser(id);
+}
+
+async function deleteUser(id) {
+    const userId = String(id);
+    await db.run("DELETE FROM inventory WHERE user_id = ?", userId);
+    const result = await db.run("DELETE FROM users WHERE id = ?", userId);
+    return result.changes > 0;
+}
+
+async function setInventoryItem(userId, itemId, qty) {
+    const id = String(userId);
+    const item = String(itemId ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+    const n = Math.floor(Number(qty) || 0);
+    await getUser(id);
+    if (!item) {
+        return false;
+    }
+    if (n <= 0) {
+        await db.run("DELETE FROM inventory WHERE user_id = ? AND item_id = ?", id, item);
+        return true;
+    }
+    await db.run(
+        `INSERT INTO inventory(user_id, item_id, qty) VALUES(?, ?, ?)
+         ON CONFLICT(user_id, item_id) DO UPDATE SET qty = excluded.qty`,
+        id,
+        item,
+        n
+    );
+    return true;
 }
 
 async function searchUsers(query, limit = 20) {
@@ -1145,7 +1197,14 @@ function asCustomCommand(row) {
         color: row.color || "",
         image: row.image || "",
         thumbnail: row.thumbnail || "",
-        footer: row.footer || ""
+        footer: row.footer || "",
+        content: row.content || "",
+        author: row.author || "",
+        authorIcon: row.author_icon || "",
+        url: row.url || "",
+        footerIcon: row.footer_icon || "",
+        fields: row.fields || "",
+        timestamp: Number(row.timestamp) !== 0
     };
 }
 
@@ -1172,12 +1231,8 @@ function asGuildSettings(row, id) {
             .split(",")
             .map(name => name.trim())
             .filter(Boolean),
-        flipMax: Number(row?.flip_max) || 10000,
-        flipMin: Math.max(1, Number(row?.flip_min) || 10),
-        payMax: Number(row?.pay_max) || 0,
-        payMin: Math.max(1, Number(row?.pay_min) || 1),
-        robMin: Math.max(1, Number(row?.rob_min) || 50),
-        buyMax: Math.max(1, Math.min(50, Number(row?.buy_max) || 20))
+        xpOn: row?.xp_on == null ? true : Number(row.xp_on) !== 0,
+        levelMoney: Math.max(0, Number(row?.level_money) || 250)
     };
 }
 
@@ -1241,25 +1296,17 @@ async function saveGuildSettings(guildId, patch) {
                 .split(",")
                 .map(name => name.trim())
                 .filter(Boolean),
-        flipMax: Math.max(10, Math.min(1000000, Number(pick(patch, current, "flipMax")) || 10000)),
-        flipMin: Math.max(1, Math.min(10000, Number(pick(patch, current, "flipMin")) || 10)),
-        payMax: Math.max(0, Math.min(100000000, Number(pick(patch, current, "payMax")) || 0)),
-        payMin: Math.max(1, Math.min(1000000, Number(pick(patch, current, "payMin")) || 1)),
-        robMin: Math.max(1, Math.min(100000, Number(pick(patch, current, "robMin")) || 50)),
-        buyMax: Math.max(1, Math.min(50, Number(pick(patch, current, "buyMax")) || 20))
+        xpOn: pick(patch, current, "xpOn") ? 1 : 0,
+        levelMoney: Math.max(0, Math.min(1e12, Number(pick(patch, current, "levelMoney")) || 0))
     };
-
-    if (next.flipMin > next.flipMax) {
-        next.flipMin = next.flipMax;
-    }
 
     await db.run(
         `INSERT INTO guilds(
             id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message,
             autorole_ids, log_channel, log_joins, log_messages, log_mod,
             levels_on, levels_channel, levels_message, automod_invites, automod_words,
-            disabled_commands, flip_max, flip_min, pay_max, pay_min, rob_min, buy_max
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            disabled_commands, xp_on, level_money
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
@@ -1278,12 +1325,8 @@ async function saveGuildSettings(guildId, patch) {
             automod_invites = excluded.automod_invites,
             automod_words = excluded.automod_words,
             disabled_commands = excluded.disabled_commands,
-            flip_max = excluded.flip_max,
-            flip_min = excluded.flip_min,
-            pay_max = excluded.pay_max,
-            pay_min = excluded.pay_min,
-            rob_min = excluded.rob_min,
-            buy_max = excluded.buy_max`,
+            xp_on = excluded.xp_on,
+            level_money = excluded.level_money`,
         id,
         next.prefix,
         next.prefixText,
@@ -1302,12 +1345,8 @@ async function saveGuildSettings(guildId, patch) {
         next.automodInvites,
         next.automodWords,
         next.disabledCommands.join(","),
-        next.flipMax,
-        next.flipMin,
-        next.payMax,
-        next.payMin,
-        next.robMin,
-        next.buyMax
+        next.xpOn,
+        next.levelMoney
     );
 
     return getGuildSettings(id);
@@ -1319,7 +1358,7 @@ function cleanCommandName(name) {
 
 async function listCustomCommands(guildId) {
     const rows = await db.all(
-        "SELECT name, response, title, color, image, thumbnail, footer FROM custom_commands WHERE guild_id = ? ORDER BY name",
+        "SELECT * FROM custom_commands WHERE guild_id = ? ORDER BY name",
         String(guildId)
     );
     return rows.map(asCustomCommand);
@@ -1331,7 +1370,7 @@ async function getCustomCommand(guildId, name) {
         return null;
     }
     const row = await db.get(
-        "SELECT name, response, title, color, image, thumbnail, footer FROM custom_commands WHERE guild_id = ? AND name = ?",
+        "SELECT * FROM custom_commands WHERE guild_id = ? AND name = ?",
         String(guildId),
         key
     );
@@ -1341,31 +1380,32 @@ async function getCustomCommand(guildId, name) {
 async function saveCustomCommand(guildId, name, response, extra = {}) {
     const key = cleanCommandName(name);
     const data = typeof response === "object" && response !== null ? response : { response, ...extra };
-    const text = String(data.response ?? "").trim().slice(0, 4000);
+    const text = String(data.response ?? "").trim().slice(0, 4096);
     const title = String(data.title ?? "").trim().slice(0, 256);
-    if (!key || (!text && !title)) {
+    const content = String(data.content ?? "").trim().slice(0, 2000);
+    if (!key || (!text && !title && !content)) {
         return { ok: false, reason: "invalid" };
     }
 
-    const count = await db.get(
-        "SELECT COUNT(*) AS n FROM custom_commands WHERE guild_id = ?",
-        String(guildId)
-    );
-    const existing = await getCustomCommand(guildId, key);
-    if (!existing && (Number(count?.n) || 0) >= 40) {
-        return { ok: false, reason: "limit" };
-    }
-
     await db.run(
-        `INSERT INTO custom_commands(guild_id, name, response, title, color, image, thumbnail, footer)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO custom_commands(
+            guild_id, name, response, title, color, image, thumbnail, footer,
+            content, author, author_icon, url, footer_icon, fields, timestamp
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id, name) DO UPDATE SET
             response = excluded.response,
             title = excluded.title,
             color = excluded.color,
             image = excluded.image,
             thumbnail = excluded.thumbnail,
-            footer = excluded.footer`,
+            footer = excluded.footer,
+            content = excluded.content,
+            author = excluded.author,
+            author_icon = excluded.author_icon,
+            url = excluded.url,
+            footer_icon = excluded.footer_icon,
+            fields = excluded.fields,
+            timestamp = excluded.timestamp`,
         String(guildId),
         key,
         text,
@@ -1373,7 +1413,14 @@ async function saveCustomCommand(guildId, name, response, extra = {}) {
         String(data.color ?? "").trim().slice(0, 16),
         String(data.image ?? "").trim().slice(0, 500),
         String(data.thumbnail ?? "").trim().slice(0, 500),
-        String(data.footer ?? "").trim().slice(0, 200)
+        String(data.footer ?? "").trim().slice(0, 2048),
+        content,
+        String(data.author ?? "").trim().slice(0, 256),
+        String(data.authorIcon ?? data.author_icon ?? "").trim().slice(0, 500),
+        String(data.url ?? "").trim().slice(0, 500),
+        String(data.footerIcon ?? data.footer_icon ?? "").trim().slice(0, 500),
+        String(data.fields ?? "").slice(0, 6000),
+        data.timestamp ? 1 : 0
     );
     return { ok: true, name: key };
 }
@@ -1445,6 +1492,10 @@ module.exports = {
     saveShopItem,
     deleteShopItem,
     setWallet,
+    setUser,
+    resetCooldowns,
+    deleteUser,
+    setInventoryItem,
     searchUsers,
     isPrefixEnabled,
     setPrefixEnabled,

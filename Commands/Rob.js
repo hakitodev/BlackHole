@@ -33,18 +33,14 @@ module.exports = {
             return error(interaction, "Нельзя ограбить себя.");
         }
 
-        const settings = interaction.guild
-            ? await economy.getGuildSettings(interaction.guild.id)
-            : { robMin: 50 };
-        const robMin = settings.robMin || 50;
         const victim = await economy.getUser(target.id);
 
-        if (victim.balance < robMin) {
-            return error(interaction, `Мало наличных (нужно от **${robMin}**). Банк не украсть.`);
+        if (victim.balance < 1) {
+            return error(interaction, "Нечего брать. Банк не украсть.");
         }
 
         const success = Math.random() < 0.35;
-        const steal = Math.max(robMin, Math.floor(victim.balance * (integer(15, 35) / 100)));
+        const steal = Math.max(1, Math.floor(victim.balance * (integer(15, 35) / 100)));
         const fine = integer(80, 180);
 
         const result = await economy.attemptRob(
@@ -54,7 +50,7 @@ module.exports = {
             success,
             steal,
             fine,
-            robMin
+            1
         );
 
         if (!result.ok && result.reason === "cooldown") {

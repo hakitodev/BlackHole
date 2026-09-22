@@ -38,12 +38,11 @@ module.exports = {
 
         const user = await economy.getUser(target.id);
         const parsed = parseAmount(rawAmount(interaction), {
-            max: 1000000,
             available: user.balance + user.bank
         });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { max: 1000000 }));
+            return error(interaction, amountMessage(parsed));
         }
 
         const result = await economy.takeBalance(target.id, parsed.amount);

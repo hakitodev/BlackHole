@@ -1,14 +1,12 @@
-const { EmbedBuilder } = require("discord.js");
 const { PREFIX } = require("../Config");
 const economy = require("../Database/Economy");
 const { stripPrefix, splitCommand } = require("../Utils/prefix");
 const { createMessageContext } = require("../Utils/messageCommand");
 const { runCommand, resolveCommand } = require("../Utils/runCommand");
-const { fill } = require("../Utils/placeholders");
 const { canGainXp, xpGain } = require("../Utils/xp");
 const { parseWords, hasInvite, findBannedWord, isPrivileged } = require("../Utils/automod");
 const { fireEvent } = require("../Utils/events");
-const { parseColor, isUrl } = require("../Utils/color");
+const { customPayload } = require("../Utils/customEmbed");
 
 async function repliedUser(message) {
     if (message.mentions.repliedUser) {
@@ -62,12 +60,18 @@ module.exports = {
                 return;
             }
 
-            if (canGainXp(message.guild.id, message.author.id)) {
-                const progress = await economy.addXp(message.author.id, xpGain());
+            if (settings.xpOn !== false && canGainXp(message.guild.id, message.author.id)) {
+                const progress = await economy.addXp(
+                    message.author.id,
+                    xpGain(),
+                    settings.levelMoney
+                );
                 if (progress?.leveled) {
                     await fireEvent(message.guild, "levelUp", {
                         user: message.author,
-                        level: progress.level
+                        level: progress.level,
+                        money: progress.money,
+                        xp: progress.xp
                     }, message.channel);
                 }
             }
@@ -110,24 +114,13 @@ module.exports = {
             return;
         }
 
-        const vars = { user: message.author, guild: message.guild };
-        const embed = new EmbedBuilder().setColor(parseColor(custom.color));
-        if (custom.title) {
-            embed.setTitle(fill(custom.title, vars).slice(0, 256));
+        const payload = customPayload(custom, {
+            user: message.author,
+            guild: message.guild
+        });
+        if (!payload.content && !payload.embeds) {
+            return;
         }
-        if (custom.response) {
-            embed.setDescription(fill(custom.response, vars).slice(0, 4000));
-        }
-        if (isUrl(custom.image)) {
-            embed.setImage(custom.image);
-        }
-        if (isUrl(custom.thumbnail)) {
-            embed.setThumbnail(custom.thumbnail);
-        }
-        if (custom.footer) {
-            embed.setFooter({ text: fill(custom.footer, vars).slice(0, 200) });
-        }
-
-        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await message.channel.send(payload).catch(() => {});
     }
 };

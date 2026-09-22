@@ -154,7 +154,7 @@ test("rob: у цели мало наличных", async () => {
     const robber = uid("rob");
     const victim = uid("rob");
 
-    await economy.addBalance(victim, 40);
+    await economy.addBalance(victim, 0);
     await economy.deposit(victim, 500);
 
     const result = await economy.attemptRob(
@@ -169,7 +169,7 @@ test("rob: у цели мало наличных", async () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, "empty");
     assert.equal(await cash(robber), 0);
-    assert.equal(await cash(victim), 40);
+    assert.equal(await cash(victim), 0);
 });
 
 test("rob: кулдаун не списывает деньги повторно", async () => {

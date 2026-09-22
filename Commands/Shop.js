@@ -1,6 +1,15 @@
 const { SlashCommandBuilder } = require("discord.js");
-const { list } = require("../Utils/shop");
+const economy = require("../Database/Economy");
 const { reply, COLOR } = require("../Utils/reply");
+
+function block(title, items) {
+    if (!items.length) {
+        return `**${title}**\nпусто`;
+    }
+    return `**${title}**\n` + items.map(item =>
+        `${item.emoji} **${item.name}** — ${item.price}\n${item.description}`
+    ).join("\n\n");
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -8,8 +17,14 @@ module.exports = {
         .setDescription("Магазин"),
 
     async execute(interaction) {
-        const items = await list(interaction.guildId);
-        if (!items.length) {
+        const global = await economy.listShopItems("global");
+        const local = interaction.guildId
+            ? await economy.listShopItems(interaction.guildId)
+            : [];
+        const taken = new Set(local.map(item => item.id));
+        const world = global.filter(item => !taken.has(item.id));
+
+        if (!world.length && !local.length) {
             return reply(interaction, {
                 color: COLOR.pink,
                 title: "Магазин",
@@ -17,14 +32,11 @@ module.exports = {
             });
         }
 
-        const lines = items.map(item =>
-            `${item.emoji} **${item.name}** — ${item.price}\n${item.description}`
-        );
-
+        const text = [block("Всемирный", world), block("Сервер", local)].join("\n\n");
         return reply(interaction, {
             color: COLOR.pink,
             title: "Магазин",
-            description: lines.join("\n\n").slice(0, 4000)
+            description: text.slice(0, 4000)
         });
     }
 };

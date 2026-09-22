@@ -1,5 +1,4 @@
 const { PermissionFlagsBits } = require("discord.js");
-const { DANGEROUS_PERMISSIONS } = require("../Utils/roles");
 const { reply, error, COLOR } = require("../Utils/reply");
 
 module.exports = {
@@ -16,10 +15,6 @@ module.exports = {
 
         if (!role || role.id === interaction.guild.id || role.managed) {
             return error(interaction, "Роль недоступна.");
-        }
-
-        if (DANGEROUS_PERMISSIONS.some(permission => role.permissions.has(permission))) {
-            return error(interaction, "Эту роль нельзя выдать так.");
         }
 
         const me = interaction.guild.members.me;

@@ -27,14 +27,14 @@ module.exports = {
         }
 
         const target = interaction.options.getUser("user");
-        const parsed = parseAmount(rawAmount(interaction), { max: 1000000 });
+        const parsed = parseAmount(rawAmount(interaction), {});
 
         if (!target) {
             return error(interaction, "Укажи пользователя или ответь на сообщение.");
         }
 
         if (!parsed.ok || parsed.all) {
-            return error(interaction, parsed.all ? "Укажи сумму." : amountMessage(parsed, { max: 1000000 }));
+            return error(interaction, parsed.all ? "Укажи сумму." : amountMessage(parsed));
         }
 
         if (target.bot) {

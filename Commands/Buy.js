@@ -19,7 +19,6 @@ module.exports = {
                 .setName("qty")
                 .setDescription("Количество")
                 .setMinValue(1)
-                .setMaxValue(50)
         ),
 
     async autocomplete(interaction) {
@@ -41,10 +40,6 @@ module.exports = {
 
     async execute(interaction) {
         const itemId = interaction.options.getString("item");
-        const settings = interaction.guild
-            ? await economy.getGuildSettings(interaction.guild.id)
-            : { buyMax: 20 };
-        const buyMax = settings.buyMax || 20;
         const qty = interaction.options.getInteger("qty") ?? 1;
         const item = await find(interaction.guildId, itemId)
             ?? await get(itemId, interaction.guildId);
@@ -53,8 +48,8 @@ module.exports = {
             return error(interaction, "Такого предмета нет.");
         }
 
-        if (!Number.isInteger(qty) || qty < 1 || qty > buyMax) {
-            return error(interaction, `Количество от 1 до ${buyMax}.`);
+        if (!Number.isInteger(qty) || qty < 1) {
+            return error(interaction, "Количество от 1.");
         }
 
         const result = await economy.buyItem(interaction.user.id, item.id, item.price, qty);

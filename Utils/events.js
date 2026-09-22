@@ -100,14 +100,13 @@ async function fireEvent(guild, name, vars = {}, fallbackChannel = null) {
     }
 
     const text = fill(config.message || type.fallback, {
+        ...vars,
         user: vars.user,
         guild,
-        level: vars.level,
-        ...vars
-    }).replaceAll("{channel}", vars.channel || "")
-        .replaceAll("{reason}", vars.reason || "причина отсутствует")
-        .replaceAll("{text}", vars.text || "без текста")
-        .replaceAll("{after}", vars.after || "");
+        reason: vars.reason || "причина отсутствует",
+        text: vars.text || "без текста",
+        after: vars.after || ""
+    });
 
     await channel.send({
         embeds: [new EmbedBuilder().setColor(type.color).setDescription(text.slice(0, 4000))]

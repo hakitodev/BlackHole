@@ -63,6 +63,10 @@ function fakeClient(guildId = GUILD_ID) {
         channels: { cache: channels }
     };
     return {
+        user: {
+            username: "BlackHole",
+            displayAvatarURL: () => "https://cdn.discordapp.com/embed/avatars/1.png"
+        },
         guilds: {
             cache: new Map([[guildId, guild]])
         }
@@ -118,7 +122,7 @@ test("GET / отдаёт лендинг", async () => {
     const res = mockRes();
     await handleRequest(mockReq({ url: "/" }), res, fakeClient());
     assert.equal(res.statusCode, 200);
-    assert.match(res.body, /Настрой бота с сайта/);
+    assert.match(res.body, /Панель бота/);
     assert.match(res.body, /Войти через Discord/);
 });
 
@@ -169,12 +173,14 @@ test("GET /servers/:id/general форма и экранирование имен
     }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /Сервер &lt;script&gt;/);
-    assert.doesNotMatch(res.body, /<script>/);
+    assert.doesNotMatch(res.body, /Сервер <script>/);
     assert.match(res.body, /name="prefixText"/);
     assert.match(res.body, /Автороль/);
     assert.match(res.body, /Автомод/);
-    assert.match(res.body, /Ограничения/);
+    assert.match(res.body, /Команды/);
     assert.match(res.body, /Ивенты/);
+    assert.match(res.body, /Выйти/);
+    assert.match(res.body, /XP за сообщения/);
 });
 
 test("GET /servers/:id/join каналы без войса", async () => {
@@ -188,6 +194,7 @@ test("GET /servers/:id/join каналы без войса", async () => {
     assert.doesNotMatch(res.body, /#voice/);
     assert.match(res.body, /name="message"/);
     assert.match(res.body, /Вход/);
+    assert.match(res.body, /data-tag="\{user\}"/);
 });
 
 test("POST /servers/:id/join сохраняет ивент отдельно", async () => {
@@ -242,7 +249,7 @@ test("POST /servers/:id/commands добавляет кастом-команду"
     const res = mockRes();
     await handleRequest(mockReq({
         method: "POST",
-        url: `/servers/${GUILD_ID}/commands`,
+        url: `/servers/${GUILD_ID}/custom`,
         headers: {
             cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
@@ -259,7 +266,7 @@ test("POST /servers/:id/commands сохраняет эмбед", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
         method: "POST",
-        url: `/servers/${GUILD_ID}/commands`,
+        url: `/servers/${GUILD_ID}/custom`,
         headers: {
             cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
@@ -273,32 +280,27 @@ test("POST /servers/:id/commands сохраняет эмбед", async () => {
     assert.equal(custom.footer, "BH");
 });
 
-test("POST /servers/:id/limits сохраняет ограничения", async () => {
+test("POST /servers/:id/cmd выключает команду", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
         method: "POST",
-        url: `/servers/${GUILD_ID}/limits`,
+        url: `/servers/${GUILD_ID}/cmd/flip`,
         headers: {
             cookie: await sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
         },
-        body: "disabled=flip&disabled=rob&flipMin=20&flipMax=500&payMin=5&payMax=1000&robMin=80&buyMax=3"
+        body: "enabled=0"
     }), res, fakeClient());
 
     assert.equal(res.statusCode, 302);
     const settings = await economy.getGuildSettings(GUILD_ID);
-    assert.deepEqual(settings.disabledCommands.sort(), ["flip", "rob"]);
-    assert.equal(settings.flipMax, 500);
-    assert.equal(settings.flipMin, 20);
-    assert.equal(settings.payMax, 1000);
-    assert.equal(settings.robMin, 80);
-    assert.equal(settings.buyMax, 3);
+    assert.ok(settings.disabledCommands.includes("flip"));
 });
 
 test("GET /admin/economy без ранга — 403", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
-        url: "/admin/economy",
+        url: "/admin/users",
         headers: { cookie: await sessionCookie({ user: { id: "99", username: "nope" } }) }
     }), res, fakeClient());
     assert.equal(res.statusCode, 403);
@@ -311,7 +313,7 @@ test("высший модер правит экономику и глобаль�
     const eco = mockRes();
     await handleRequest(mockReq({
         method: "POST",
-        url: "/admin/economy",
+        url: "/admin/users",
         headers: {
             cookie,
             "content-type": "application/x-www-form-urlencoded"

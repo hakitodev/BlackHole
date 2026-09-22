@@ -62,20 +62,14 @@ module.exports = {
             return error(interaction, "Нельзя перевести себе.");
         }
 
-        const settings = interaction.guild
-            ? await economy.getGuildSettings(interaction.guild.id)
-            : { payMin: 1, payMax: 0 };
-        const min = settings.payMin || 1;
-        const max = settings.payMax > 0 ? settings.payMax : Infinity;
         const user = await economy.getUser(interaction.user.id);
         const parsed = parseAmount(rawAmount(interaction), {
-            min,
-            max,
+            min: 1,
             available: user.balance
         });
 
         if (!parsed.ok) {
-            return error(interaction, amountMessage(parsed, { min, max }));
+            return error(interaction, amountMessage(parsed, { min: 1 }));
         }
 
         const key = `pay:${interaction.user.id}`;

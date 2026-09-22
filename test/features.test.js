@@ -112,12 +112,11 @@ test("setWallet ставит наличные и банк", async () => {
     assert.equal(user.bank, 15);
 });
 
-test("выключенные команды: help не гасится", () => {
+test("выключенные команды", () => {
     const settings = { disabledCommands: ["flip", "help", "rob"] };
     assert.equal(isDisabled(settings, "flip"), true);
     assert.equal(isDisabled(settings, "cf"), true);
-    assert.equal(isDisabled(settings, "help"), false);
-    assert.equal(isDisabled(settings, "give"), false);
+    assert.equal(isDisabled(settings, "help"), true);
     assert.equal(isDisabled(settings, "collect"), false);
 });
 
@@ -125,4 +124,26 @@ test("seed глобального шопа не пустой", async () => {
     const items = await economy.listShopItems("global");
     assert.ok(items.length >= 7);
     assert.ok(items.some(item => item.id === "coffee"));
+});
+
+test("уровень сыпет монеты", async () => {
+    const id = "lvl-pay";
+    await economy.addXp(id, 1000, 250);
+    const user = await economy.getUser(id);
+    assert.ok(user.level > 1);
+    assert.ok(user.balance >= 250);
+});
+
+test("setUser и инвентарь", async () => {
+    const id = "full-user";
+    await economy.setUser(id, { balance: 5, bank: 7, xp: 3, level: 2 });
+    const user = await economy.getUser(id);
+    assert.equal(user.balance, 5);
+    assert.equal(user.level, 2);
+    await economy.setInventoryItem(id, "coffee", 4);
+    const inv = await economy.getInventory(id);
+    assert.equal(inv[0].qty, 4);
+    await economy.deleteUser(id);
+    const gone = await economy.getUser(id);
+    assert.equal(gone.balance, 0);
 });

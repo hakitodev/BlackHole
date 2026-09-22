@@ -1,17 +1,17 @@
-const RESTRICTABLE = [
-    { id: "collect", title: "collect — ежедневка / работа / криминал" },
-    { id: "bal", title: "bal — баланс" },
-    { id: "rob", title: "rob — ограбление" },
-    { id: "pay", title: "pay — перевод" },
-    { id: "flip", title: "flip — орёл/решка" },
-    { id: "dep", title: "dep — в банк" },
-    { id: "with", title: "with — из банка" },
-    { id: "top", title: "top — топ" },
-    { id: "profile", title: "profile — профиль" },
-    { id: "rank", title: "rank — уровень" },
-    { id: "shop", title: "shop — магазин" },
-    { id: "buy", title: "buy — покупка" },
-    { id: "inv", title: "inv — инвентарь" },
+const COMMANDS = [
+    { id: "collect", title: "collect" },
+    { id: "bal", title: "bal" },
+    { id: "rob", title: "rob" },
+    { id: "pay", title: "pay" },
+    { id: "flip", title: "flip" },
+    { id: "dep", title: "dep" },
+    { id: "with", title: "with" },
+    { id: "top", title: "top" },
+    { id: "profile", title: "profile" },
+    { id: "rank", title: "rank" },
+    { id: "shop", title: "shop" },
+    { id: "buy", title: "buy" },
+    { id: "inv", title: "inv" },
     { id: "8ball", title: "8ball" },
     { id: "roll", title: "roll" },
     { id: "pick", title: "pick" },
@@ -21,10 +21,14 @@ const RESTRICTABLE = [
     { id: "server", title: "server" },
     { id: "authpanel", title: "authpanel" },
     { id: "clear", title: "clear" },
-    { id: "slowmode", title: "slowmode" }
+    { id: "slowmode", title: "slowmode" },
+    { id: "settings", title: "settings" },
+    { id: "help", title: "help" },
+    { id: "give", title: "give" },
+    { id: "take", title: "take" },
+    { id: "eco", title: "eco" },
+    { id: "mod", title: "mod" }
 ];
-
-const LOCKED = new Set(["help", "settings", "mod", "give", "take", "eco"]);
 
 const ALIASES = {
     balance: "bal",
@@ -51,16 +55,13 @@ function canonicalName(name) {
 
 function isDisabled(settings, name) {
     const key = canonicalName(name);
-    if (LOCKED.has(key)) {
-        return false;
-    }
     const list = settings?.disabledCommands || [];
     return list.includes(key) || list.includes(String(name ?? "").toLowerCase());
 }
 
 module.exports = {
-    RESTRICTABLE,
-    LOCKED,
+    COMMANDS,
+    RESTRICTABLE: COMMANDS,
     canonicalName,
     isDisabled
 };

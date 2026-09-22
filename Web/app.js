@@ -18,20 +18,20 @@ const {
     homePage,
     serversPage,
     settingsPage,
-    economyPage,
+    usersPage,
     adminShopPage,
-    errorPage,
-    MODULES
+    errorPage
 } = require("./html");
 const { asList } = require("../Utils/ids");
-const { DANGEROUS_PERMISSIONS } = require("../Utils/roles");
 const { isBotAdmin } = require("../Utils/staff");
 const { eventType } = require("../Utils/events");
+const { COMMANDS, canonicalName } = require("../Utils/commands");
 
 const STYLE = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+const EDITOR = fs.readFileSync(path.join(__dirname, "editor.js"), "utf8");
 const oauthStates = new Map();
 const STATE_TTL = 10 * 60 * 1000;
-const MODULE_IDS = new Set(MODULES.filter(item => item.id).map(item => item.id));
+const CMD_IDS = new Set(COMMANDS.map(item => item.id));
 
 function send(res, status, body, headers = {}) {
     res.writeHead(status, {
@@ -63,7 +63,7 @@ function readBody(req) {
         let size = 0;
         req.on("data", chunk => {
             size += chunk.length;
-            if (size > 65536) {
+            if (size > 524288) {
                 reject(new Error("too large"));
                 req.destroy();
                 return;
@@ -93,6 +93,25 @@ function withBotFlag(client, guilds) {
     }));
 }
 
+function botInfo(client) {
+    const user = client?.user;
+    if (!user) {
+        return { name: "BlackHole", avatar: "" };
+    }
+    let avatar = "";
+    try {
+        avatar = typeof user.displayAvatarURL === "function"
+            ? user.displayAvatarURL({ size: 64 })
+            : "";
+    } catch {
+        avatar = "";
+    }
+    return {
+        name: user.globalName || user.username || "BlackHole",
+        avatar
+    };
+}
+
 function checked(form, key) {
     const value = form[key];
     if (Array.isArray(value)) {
@@ -108,16 +127,12 @@ function assignableRoles(guild) {
             if (!role || role.id === guild.id || role.managed) {
                 return false;
             }
-            if (DANGEROUS_PERMISSIONS.some(permission => role.permissions?.has?.(permission))) {
-                return false;
-            }
             if (me?.roles?.highest && me.roles.highest.comparePositionTo(role) <= 0) {
                 return false;
             }
             return true;
         })
         .sort((a, b) => (b.rawPosition ?? 0) - (a.rawPosition ?? 0))
-        .slice(0, 40)
         .map(role => ({ id: role.id, name: role.name }));
 }
 
@@ -131,20 +146,11 @@ function patchFromForm(module, form) {
             automodWords: form.automodWords
         };
     }
-    if (module === "limits") {
-        return {
-            disabledCommands: asList(form.disabled),
-            flipMin: form.flipMin,
-            flipMax: form.flipMax,
-            payMin: form.payMin,
-            payMax: form.payMax,
-            robMin: form.robMin,
-            buyMax: form.buyMax
-        };
-    }
     return {
         prefix: checked(form, "prefix"),
-        prefixText: form.prefixText
+        prefixText: form.prefixText,
+        xpOn: checked(form, "xpOn"),
+        levelMoney: form.levelMoney
     };
 }
 
@@ -157,6 +163,24 @@ function textChannels(guild) {
 
 function sessionCookie(session) {
     return session?.id ? { "Set-Cookie": cookieHeader(session.id) } : {};
+}
+
+function customFromForm(form) {
+    return {
+        response: form.response,
+        title: form.title,
+        color: form.colorHex || form.color,
+        image: form.image,
+        thumbnail: form.thumbnail,
+        footer: form.footer,
+        content: form.content,
+        author: form.author,
+        authorIcon: form.authorIcon,
+        url: form.url,
+        footerIcon: form.footerIcon,
+        fields: form.fields,
+        timestamp: checked(form, "timestamp")
+    };
 }
 
 async function refreshSession(session) {
@@ -188,6 +212,65 @@ async function refreshSession(session) {
     }
 }
 
+async function handleAdminUsers(req, res, url, user, admin, bot, cookies) {
+    if (req.method === "POST") {
+        try {
+            const form = parseForm(await readBody(req));
+            const id = String(form.id || "").replace(/\D/g, "");
+            if (!id) {
+                send(res, 400, usersPage({
+                    user,
+                    admin,
+                    bot,
+                    users: await economy.searchUsers(""),
+                    error: "Нужен Discord ID."
+                }), cookies);
+                return;
+            }
+            if (form.op === "delete") {
+                await economy.deleteUser(id);
+                redirect(res, "/admin/users?saved=1", cookies);
+                return;
+            }
+            if (form.op === "reset") {
+                await economy.resetCooldowns(id);
+                redirect(res, `/admin/users?q=${encodeURIComponent(id)}&saved=1`, cookies);
+                return;
+            }
+            if (form.op === "inv") {
+                await economy.setInventoryItem(id, form.item, form.qty);
+                redirect(res, `/admin/users?q=${encodeURIComponent(id)}&saved=1`, cookies);
+                return;
+            }
+            await economy.setUser(id, {
+                balance: form.balance,
+                bank: form.bank,
+                xp: form.xp,
+                level: form.level
+            });
+            redirect(res, `/admin/users?q=${encodeURIComponent(id)}&saved=1`, cookies);
+        } catch (error) {
+            console.error(error);
+            send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить." }), cookies);
+        }
+        return;
+    }
+
+    const query = url.searchParams.get("q") || "";
+    const users = await economy.searchUsers(query);
+    const current = query ? await economy.getUser(query.replace(/\D/g, "") || query) : null;
+    send(res, 200, usersPage({
+        user,
+        admin,
+        bot,
+        query,
+        users,
+        current: query ? current : null,
+        inventory: query && current ? await economy.getInventory(current.id) : [],
+        saved: url.searchParams.get("saved") === "1"
+    }), cookies);
+}
+
 async function handleRequest(req, res, client) {
     const url = new URL(req.url, "http://localhost");
     let session = await sessionFromRequest(req);
@@ -197,6 +280,7 @@ async function handleRequest(req, res, client) {
     const user = session?.user ?? null;
     const admin = user ? await isBotAdmin(user.id, client) : false;
     const cookies = sessionCookie(session);
+    const bot = botInfo(client);
 
     if (url.pathname === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -210,14 +294,20 @@ async function handleRequest(req, res, client) {
         return;
     }
 
+    if (url.pathname === "/editor.js") {
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+        res.end(EDITOR);
+        return;
+    }
+
     if (url.pathname === "/") {
-        send(res, 200, homePage({ user, admin, configured: Boolean(CLIENT_ID && CLIENT_SECRET) }), cookies);
+        send(res, 200, homePage({ user, admin, bot, configured: Boolean(CLIENT_ID && CLIENT_SECRET) }), cookies);
         return;
     }
 
     if (url.pathname === "/login") {
         if (!CLIENT_ID || !CLIENT_SECRET) {
-            send(res, 500, errorPage({ user, admin, message: "Задай CLIENT_ID, CLIENT_SECRET и PUBLIC_URL." }));
+            send(res, 500, errorPage({ user, admin, bot, message: "Задай CLIENT_ID, CLIENT_SECRET и PUBLIC_URL." }));
             return;
         }
         const state = crypto.randomBytes(16).toString("hex");
@@ -240,7 +330,7 @@ async function handleRequest(req, res, client) {
         oauthStates.delete(state);
 
         if (!code || !created || Date.now() - created > STATE_TTL) {
-            send(res, 400, errorPage({ user, admin, message: "Сессия входа истекла. Попробуй ещё раз." }));
+            send(res, 400, errorPage({ user, admin, bot, message: "Сессия входа истекла. Попробуй ещё раз." }));
             return;
         }
 
@@ -258,7 +348,7 @@ async function handleRequest(req, res, client) {
             redirect(res, "/servers", { "Set-Cookie": cookieHeader(id) });
         } catch (error) {
             console.error(error);
-            send(res, 500, errorPage({ user, admin, message: "Discord не пустил. Проверь CLIENT_SECRET и PUBLIC_URL." }));
+            send(res, 500, errorPage({ user, admin, bot, message: "Discord не пустил. Проверь CLIENT_SECRET и PUBLIC_URL." }));
         }
         return;
     }
@@ -271,55 +361,29 @@ async function handleRequest(req, res, client) {
         send(res, 200, serversPage({
             user,
             admin,
+            bot,
             guilds: withBotFlag(client, managedGuilds(session))
         }), cookies);
         return;
     }
 
-    if (url.pathname === "/admin/economy" || url.pathname === "/admin/shop") {
+    if (url.pathname === "/admin/economy") {
+        redirect(res, "/admin/users" + url.search, cookies);
+        return;
+    }
+
+    if (url.pathname === "/admin/users" || url.pathname === "/admin/shop") {
         if (!user) {
             redirect(res, "/login");
             return;
         }
         if (!admin) {
-            send(res, 403, errorPage({ user, admin, message: "Только владелец и высшие модераторы." }), cookies);
+            send(res, 403, errorPage({ user, admin, bot, message: "Только владелец и высшие модераторы." }), cookies);
             return;
         }
 
-        if (url.pathname === "/admin/economy") {
-            if (req.method === "POST") {
-                try {
-                    const form = parseForm(await readBody(req));
-                    const id = String(form.id || "").replace(/\D/g, "");
-                    if (!id) {
-                        send(res, 400, economyPage({
-                            user,
-                            admin,
-                            users: await economy.searchUsers(""),
-                            error: "Нужен Discord ID."
-                        }), cookies);
-                        return;
-                    }
-                    await economy.setWallet(id, {
-                        balance: form.balance,
-                        bank: form.bank
-                    });
-                    redirect(res, `/admin/economy?q=${encodeURIComponent(id)}&saved=1`, cookies);
-                } catch (error) {
-                    console.error(error);
-                    send(res, 500, errorPage({ user, admin, message: "Не удалось сохранить." }), cookies);
-                }
-                return;
-            }
-
-            const query = url.searchParams.get("q") || "";
-            send(res, 200, economyPage({
-                user,
-                admin,
-                query,
-                users: await economy.searchUsers(query),
-                saved: url.searchParams.get("saved") === "1"
-            }), cookies);
+        if (url.pathname === "/admin/users") {
+            await handleAdminUsers(req, res, url, user, admin, bot, cookies);
             return;
         }
 
@@ -334,7 +398,7 @@ async function handleRequest(req, res, client) {
                 redirect(res, "/admin/shop?saved=1", cookies);
             } catch (error) {
                 console.error(error);
-                send(res, 500, errorPage({ user, admin, message: "Не удалось сохранить шоп." }), cookies);
+                send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить шоп." }), cookies);
             }
             return;
         }
@@ -342,13 +406,14 @@ async function handleRequest(req, res, client) {
         send(res, 200, adminShopPage({
             user,
             admin,
+            bot,
             items: await economy.listShopItems("global"),
             saved: url.searchParams.get("saved") === "1"
         }), cookies);
         return;
     }
 
-    const serverMatch = url.pathname.match(/^\/servers\/(\d{17,20})(?:\/([A-Za-z]+))?$/);
+    const serverMatch = url.pathname.match(/^\/servers\/(\d{17,20})(?:\/(.*))?$/);
     if (serverMatch) {
         if (!user) {
             redirect(res, "/login");
@@ -356,15 +421,10 @@ async function handleRequest(req, res, client) {
         }
 
         const guildId = serverMatch[1];
-        const module = serverMatch[2] || "";
-        if (module && !MODULE_IDS.has(module)) {
-            send(res, 404, errorPage({ user, admin, message: "Страница не найдена." }), cookies);
-            return;
-        }
-
+        const rest = String(serverMatch[2] || "");
         const listed = findManaged(session, guildId);
         if (!listed) {
-            send(res, 403, errorPage({ user, admin, message: "Нет прав на этот сервер." }), cookies);
+            send(res, 403, errorPage({ user, admin, bot, message: "Нет прав на этот сервер." }), cookies);
             return;
         }
 
@@ -373,74 +433,109 @@ async function handleRequest(req, res, client) {
             send(res, 200, errorPage({
                 user,
                 admin,
+                bot,
                 message: "Бота ещё нет на этом сервере. Добавь его, потом открой настройки.",
                 action: `<p><a class="btn" href="${escapeHtml(inviteUrl(guildId))}">Добавить бота</a></p>`
             }), cookies);
             return;
         }
 
-        const current = module || "general";
-
-        if (!module && req.method === "GET") {
+        if (!rest && req.method === "GET") {
             redirect(res, `/servers/${guildId}/general`, cookies);
             return;
         }
 
+        const cmdMatch = rest.match(/^cmd\/([a-z0-9_-]+)$/i);
+        const customMatch = rest.match(/^custom(?:\/([a-z0-9_-]+))?$/i);
+        const commandsAlias = rest === "commands";
+        const module = cmdMatch ? "cmd" : (customMatch || commandsAlias) ? "custom" : rest;
+        const cmdName = cmdMatch ? canonicalName(cmdMatch[1]) : "";
+        const customName = customMatch ? (customMatch[1] || "") : (url.searchParams.get("edit") || "");
+
+        if (module === "cmd" && !CMD_IDS.has(cmdName)) {
+            send(res, 404, errorPage({ user, admin, bot, message: "Страница не найдена." }), cookies);
+            return;
+        }
+
+        if (module !== "cmd" && module !== "custom" && !eventType(module)
+            && !["general", "autorole", "automod", "shop"].includes(module)) {
+            send(res, 404, errorPage({ user, admin, bot, message: "Страница не найдена." }), cookies);
+            return;
+        }
+
+        const custom = await economy.listCustomCommands(guildId);
+
         if (req.method === "POST") {
             try {
                 const form = parseForm(await readBody(req));
-                if (current === "commands") {
+                if (module === "custom") {
+                    const name = form.name || customName;
                     if (form.op === "delete") {
-                        await economy.deleteCustomCommand(guildId, form.name);
-                    } else {
-                        await economy.saveCustomCommand(guildId, form.name, {
-                            response: form.response,
-                            title: form.title,
-                            color: form.colorHex || form.color,
-                            image: form.image,
-                            thumbnail: form.thumbnail,
-                            footer: form.footer
-                        });
+                        await economy.deleteCustomCommand(guildId, name);
+                        redirect(res, `/servers/${guildId}/custom?saved=1`, cookies);
+                        return;
                     }
-                } else if (current === "shop") {
+                    const saved = await economy.saveCustomCommand(guildId, name, customFromForm(form));
+                    redirect(res, `/servers/${guildId}/custom/${saved.name || name}?saved=1`, cookies);
+                    return;
+                }
+                if (module === "cmd") {
+                    const settings = await economy.getGuildSettings(guildId);
+                    const disabled = new Set(settings.disabledCommands);
+                    if (checked(form, "enabled")) {
+                        disabled.delete(cmdName);
+                    } else {
+                        disabled.add(cmdName);
+                    }
+                    await economy.saveGuildSettings(guildId, { disabledCommands: [...disabled] });
+                    redirect(res, `/servers/${guildId}/cmd/${cmdName}?saved=1`, cookies);
+                    return;
+                }
+                if (module === "shop") {
                     if (form.op === "delete") {
                         await economy.deleteShopItem(guildId, form.id);
                     } else {
                         await economy.saveShopItem(guildId, form);
                     }
-                } else if (eventType(current)) {
-                    await economy.saveGuildEvent(guildId, current, {
+                    redirect(res, `/servers/${guildId}/shop?saved=1`, cookies);
+                    return;
+                }
+                if (eventType(module)) {
+                    await economy.saveGuildEvent(guildId, module, {
                         enabled: checked(form, "enabled"),
                         channel: form.channel,
                         message: form.message
                     });
-                } else {
-                    await economy.saveGuildSettings(guildId, patchFromForm(current, form));
+                    redirect(res, `/servers/${guildId}/${module}?saved=1`, cookies);
+                    return;
                 }
-                redirect(res, `/servers/${guildId}/${current}?saved=1`, cookies);
+                await economy.saveGuildSettings(guildId, patchFromForm(module, form));
+                redirect(res, `/servers/${guildId}/${module}?saved=1`, cookies);
             } catch (error) {
                 console.error(error);
-                send(res, 500, errorPage({ user, admin, message: "Не удалось сохранить." }), cookies);
+                send(res, 500, errorPage({ user, admin, bot, message: "Не удалось сохранить." }), cookies);
             }
             return;
         }
 
         const settings = await economy.getGuildSettings(guildId);
-        const editName = url.searchParams.get("edit");
         send(res, 200, settingsPage({
             user,
             admin,
+            bot,
             guild: { id: guild.id, name: guild.name },
             settings,
             channels: textChannels(guild),
             roles: assignableRoles(guild),
-            commands: current === "commands" ? await economy.listCustomCommands(guildId) : [],
-            event: eventType(current) ? await economy.getGuildEvent(guildId, current) : undefined,
-            shop: current === "shop" ? await economy.listShopItems(guildId) : [],
-            editCommand: current === "commands" && editName
-                ? await economy.getCustomCommand(guildId, editName)
+            custom,
+            event: eventType(module) ? await economy.getGuildEvent(guildId, module) : undefined,
+            shop: module === "shop" ? await economy.listShopItems(guildId) : [],
+            editCommand: module === "custom" && customName
+                ? await economy.getCustomCommand(guildId, customName)
                 : null,
-            module: current,
+            module,
+            cmdName,
+            customName,
             saved: url.searchParams.get("saved") === "1"
         }), cookies);
         return;
@@ -451,7 +546,7 @@ async function handleRequest(req, res, client) {
         return;
     }
 
-    send(res, 404, errorPage({ user, admin, message: "Страница не найдена." }), cookies);
+    send(res, 404, errorPage({ user, admin, bot, message: "Страница не найдена." }), cookies);
 }
 
 module.exports = {
