@@ -12,12 +12,20 @@ module.exports = {
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Жертва")
+                .setDescription("Жертва. Или ответь на сообщение")
                 .setRequired(true)
         ),
+    aliases: ["steal"],
 
     async execute(interaction) {
         const target = interaction.options.getUser("user");
+
+        if (!target) {
+            return interaction.reply({
+                content: "Укажи пользователя или ответь на его сообщение.",
+                ephemeral: true
+            });
+        }
 
         if (target.bot) {
             return interaction.reply({

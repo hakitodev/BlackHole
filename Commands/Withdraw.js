@@ -15,6 +15,14 @@ module.exports = {
 
     async execute(interaction) {
         const amount = interaction.options.getInteger("amount");
+
+        if (!Number.isInteger(amount) || amount < 1) {
+            return interaction.reply({
+                content: "Укажи сумму.",
+                ephemeral: true
+            });
+        }
+
         const result = await economy.withdraw(interaction.user.id, amount);
 
         if (!result.ok) {

@@ -32,6 +32,13 @@ module.exports = {
 
         const seconds = interaction.options.getInteger("seconds");
 
+        if (seconds == null || seconds < 0 || seconds > 21600) {
+            return interaction.reply({
+                content: "Укажи секунды от 0 до 21600.",
+                ephemeral: true
+            });
+        }
+
         try {
             await interaction.channel.setRateLimitPerUser(seconds);
         } catch {

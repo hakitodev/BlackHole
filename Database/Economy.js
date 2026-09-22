@@ -433,18 +433,28 @@ async function transfer(fromId, toId, amount) {
     });
 }
 
-async function getTop(limit = 10, type = "money") {
+async function getTop(limit = 10, type = "money", offset = 0) {
+    const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+
     if (type === "level") {
         return db.all(
-            "SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT ?",
-            limit
+            "SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT ? OFFSET ?",
+            safeLimit,
+            safeOffset
         );
     }
 
     return db.all(
-        "SELECT * FROM users ORDER BY (balance + bank) DESC, balance DESC LIMIT ?",
-        limit
+        "SELECT * FROM users ORDER BY (balance + bank) DESC, balance DESC LIMIT ? OFFSET ?",
+        safeLimit,
+        safeOffset
     );
+}
+
+async function countUsers() {
+    const row = await db.get("SELECT COUNT(*) AS n FROM users");
+    return Number(row?.n) || 0;
 }
 
 async function deposit(id, amount) {
@@ -594,6 +604,7 @@ module.exports = {
     flipBet,
     transfer,
     getTop,
+    countUsers,
     deposit,
     withdraw,
     getInventory,

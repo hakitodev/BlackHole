@@ -9,7 +9,7 @@ module.exports = {
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь")
+                .setDescription("Пользователь. Или ответь на сообщение")
         ),
 
     async execute(interaction) {

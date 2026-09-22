@@ -34,7 +34,7 @@ module.exports = {
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Получатель на этом сервере")
+                .setDescription("Получатель на этом сервере. Или ответь на сообщение")
         )
         .addStringOption(option =>
             option
@@ -54,12 +54,19 @@ module.exports = {
 
         if (!target) {
             return interaction.reply({
-                content: "Укажи пользователя или его Discord ID.",
+                content: "Укажи пользователя, его Discord ID или ответь на сообщение.",
                 ephemeral: true
             });
         }
 
         const amount = interaction.options.getInteger("amount");
+
+        if (!Number.isInteger(amount) || amount < 1) {
+            return interaction.reply({
+                content: "Укажи сумму.",
+                ephemeral: true
+            });
+        }
 
         if (target.bot) {
             return interaction.reply({

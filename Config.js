@@ -40,5 +40,6 @@ function loadServers() {
 module.exports = {
     CLIENT_ID: process.env.CLIENT_ID || "",
     OWNER_ID: process.env.OWNER_ID || "",
+    PREFIX: (process.env.PREFIX ?? "!").trim() || "!",
     SERVERS: loadServers()
 };

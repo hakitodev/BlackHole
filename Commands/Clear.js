@@ -32,6 +32,13 @@ module.exports = {
 
         const amount = interaction.options.getInteger("amount");
 
+        if (!Number.isInteger(amount) || amount < 1 || amount > 100) {
+            return interaction.reply({
+                content: "Укажи число сообщений от 1 до 100.",
+                ephemeral: true
+            });
+        }
+
         try {
             const deleted = await interaction.channel.bulkDelete(amount, true);
             await interaction.reply({

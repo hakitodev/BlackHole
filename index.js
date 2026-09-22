@@ -1,29 +1,37 @@
 require("./Config");
 
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const economy = require("./Database/Economy");
+const { runCommand, resolveCommand } = require("./Utils/runCommand");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers
-    ]
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent
+    ],
+    partials: [Partials.Channel, Partials.Message]
 });
 
 client.commands = new Map();
 client.buttons = new Map();
-
-const COMMAND_ALIASES = {
-    balance: "bal",
-    deposit: "dep",
-    withdraw: "with",
-    inventory: "inv",
-    coinflip: "flip",
-    ball: "8ball",
-    eightball: "8ball"
-};
+client.commandAliases = new Map([
+    ["balance", "bal"],
+    ["deposit", "dep"],
+    ["withdraw", "with"],
+    ["inventory", "inv"],
+    ["coinflip", "flip"],
+    ["cf", "flip"],
+    ["ball", "8ball"],
+    ["eightball", "8ball"],
+    ["daily", "collect"],
+    ["work", "collect"],
+    ["crime", "collect"]
+]);
 
 function load(folder, callback) {
     const folderPath = path.join(__dirname, folder);
@@ -46,6 +54,10 @@ function load(folder, callback) {
 load("Commands", command => {
     if (!command?.data?.name) return;
     client.commands.set(command.data.name, command);
+
+    for (const alias of command.aliases ?? []) {
+        client.commandAliases.set(String(alias).toLowerCase(), command.data.name);
+    }
 });
 
 load("Buttons", button => {
@@ -68,8 +80,7 @@ load("Events", event => {
 client.on("interactionCreate", async interaction => {
     if (interaction.isAutocomplete()) {
         try {
-            const name = COMMAND_ALIASES[interaction.commandName] ?? interaction.commandName;
-            const command = client.commands.get(name);
+            const command = resolveCommand(client, interaction.commandName);
             if (!command?.autocomplete) return;
             await command.autocomplete(interaction);
         } catch (error) {
@@ -78,41 +89,40 @@ client.on("interactionCreate", async interaction => {
         return;
     }
 
-    try {
-        if (interaction.isChatInputCommand()) {
-            const name = COMMAND_ALIASES[interaction.commandName] ?? interaction.commandName;
-            const command = client.commands.get(name);
+    if (interaction.isChatInputCommand()) {
+        const command = resolveCommand(client, interaction.commandName);
 
-            if (!command) {
-                await interaction.reply({
-                    content: "Эта команда устарела. Напиши `/` заново или перезапусти Discord.",
-                    ephemeral: true
-                });
-                return;
-            }
-
-            await command.execute(interaction);
+        if (!command) {
+            await interaction.reply({
+                content: "Эта команда устарела. Напиши `/` заново или перезапусти Discord.",
+                ephemeral: true
+            });
             return;
         }
 
-        if (interaction.isButton()) {
+        await runCommand(command, interaction);
+        return;
+    }
+
+    if (interaction.isButton()) {
+        try {
             const id = interaction.customId.split("_")[0];
             const button = client.buttons.get(id);
             if (!button) return;
             await button.execute(interaction);
-        }
-    } catch (error) {
-        console.error(error);
+        } catch (error) {
+            console.error(error);
 
-        const reply = {
-            content: "Произошла ошибка при выполнении команды.",
-            ephemeral: true
-        };
+            const reply = {
+                content: "Произошла ошибка при выполнении команды.",
+                ephemeral: true
+            };
 
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(reply).catch(() => {});
-        } else {
-            await interaction.reply(reply).catch(() => {});
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(reply).catch(() => {});
+            } else {
+                await interaction.reply(reply).catch(() => {});
+            }
         }
     }
 });

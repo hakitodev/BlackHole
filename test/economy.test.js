@@ -279,3 +279,22 @@ test("flip: параллельные ставки не уходят в мину�
     assert.equal(results.filter(result => result.ok).length, 1);
     assert.equal(await cash(id), 0);
 });
+
+test("getTop: страницы по offset", async () => {
+    const ids = [];
+
+    for (let i = 0; i < 12; i++) {
+        const id = uid("lb");
+        ids.push(id);
+        await economy.addBalance(id, 500000 - i);
+    }
+
+    const page0 = await economy.getTop(10, "money", 0);
+    const page1 = await economy.getTop(10, "money", 10);
+
+    assert.equal(page0.length, 10);
+    assert.equal(page0[0].id, ids[0]);
+    assert.equal(page0[9].id, ids[9]);
+    assert.ok(page1.some(user => user.id === ids[10]));
+    assert.ok((await economy.countUsers()) >= 12);
+});

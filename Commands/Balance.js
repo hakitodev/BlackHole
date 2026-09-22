@@ -8,8 +8,9 @@ module.exports = {
         .addUserOption(option =>
             option
                 .setName("user")
-                .setDescription("Пользователь")
+                .setDescription("Пользователь. Или ответь на сообщение")
         ),
+    aliases: ["balance", "money", "wallet"],
 
     async execute(interaction) {
         await interaction.deferReply();

@@ -37,6 +37,13 @@ module.exports = {
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 
+        if (!sub) {
+            return interaction.reply({
+                content: "Используй `add`, `remove` или `list`.",
+                ephemeral: true
+            });
+        }
+
         if (sub === "list") {
             if (!(await isStaff(interaction))) {
                 return interaction.reply({
@@ -71,6 +78,13 @@ module.exports = {
         }
 
         const target = interaction.options.getUser("user");
+
+        if (!target) {
+            return interaction.reply({
+                content: "Укажи пользователя или ответь на его сообщение.",
+                ephemeral: true
+            });
+        }
 
         if (target.bot) {
             return interaction.reply({

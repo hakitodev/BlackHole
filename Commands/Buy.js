@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const economy = require("../Database/Economy");
-const { get, list, format } = require("../Utils/shop");
+const { get, find, list, format } = require("../Utils/shop");
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -41,11 +41,18 @@ module.exports = {
     async execute(interaction) {
         const itemId = interaction.options.getString("item");
         const qty = interaction.options.getInteger("qty") ?? 1;
-        const item = get(itemId);
+        const item = find(itemId) ?? get(itemId);
 
         if (!item) {
             return interaction.reply({
                 content: "Такого предмета нет. Смотри /shop.",
+                ephemeral: true
+            });
+        }
+
+        if (!Number.isInteger(qty) || qty < 1 || qty > 20) {
+            return interaction.reply({
+                content: "Количество от 1 до 20.",
                 ephemeral: true
             });
         }

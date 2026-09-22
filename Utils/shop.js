@@ -58,6 +58,20 @@ function get(id) {
     return ITEMS[id] ?? null;
 }
 
+function find(query) {
+    const q = String(query ?? "").trim().toLowerCase();
+    if (!q) {
+        return null;
+    }
+
+    return get(q)
+        ?? list().find(item =>
+            item.name.toLowerCase() === q ||
+            item.id.toLowerCase() === q
+        )
+        ?? null;
+}
+
 function format(item) {
     return `${item.emoji} ${item.name}`;
 }
@@ -66,5 +80,6 @@ module.exports = {
     ITEMS,
     list,
     get,
+    find,
     format
 };
