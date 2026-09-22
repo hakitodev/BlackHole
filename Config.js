@@ -37,11 +37,30 @@ function loadServers() {
     return parseServers(fs.readFileSync(filePath, "utf8"), filePath) ?? {};
 }
 
+function resolvePublicUrl() {
+    const explicit = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    if (explicit) {
+        return explicit;
+    }
+
+    const render = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
+    if (render) {
+        return render;
+    }
+
+    const railway = (process.env.RAILWAY_PUBLIC_DOMAIN || "").replace(/\/$/, "");
+    if (railway) {
+        return railway.startsWith("http") ? railway : `https://${railway}`;
+    }
+
+    return "";
+}
+
 module.exports = {
     CLIENT_ID: process.env.CLIENT_ID || "",
     CLIENT_SECRET: process.env.CLIENT_SECRET || "",
     OWNER_ID: process.env.OWNER_ID || "",
     PREFIX: (process.env.PREFIX ?? "!").trim() || "!",
-    PUBLIC_URL: (process.env.PUBLIC_URL || "").replace(/\/$/, ""),
+    PUBLIC_URL: resolvePublicUrl(),
     SERVERS: loadServers()
 };

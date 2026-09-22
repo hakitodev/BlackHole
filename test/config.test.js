@@ -19,6 +19,9 @@ function loadConfig(env) {
             ...process.env,
             CLIENT_ID: "",
             OWNER_ID: "",
+            PUBLIC_URL: "",
+            RENDER_EXTERNAL_URL: "",
+            RAILWAY_PUBLIC_DOMAIN: "",
             SERVERS_JSON: "",
             SERVERS_FILE: "",
             ...env
@@ -69,4 +72,19 @@ test("Config: SERVERS_JSON важнее файла", () => {
     });
 
     assert.equal(config.SERVERS["333"].channelId, "444");
+});
+
+test("Config: PUBLIC_URL с Render, если сам не задал", () => {
+    const config = loadConfig({
+        RENDER_EXTERNAL_URL: "https://blackhole.onrender.com/"
+    });
+    assert.equal(config.PUBLIC_URL, "https://blackhole.onrender.com");
+});
+
+test("Config: свой PUBLIC_URL важнее Render", () => {
+    const config = loadConfig({
+        PUBLIC_URL: "https://bot.example.com",
+        RENDER_EXTERNAL_URL: "https://blackhole.onrender.com"
+    });
+    assert.equal(config.PUBLIC_URL, "https://bot.example.com");
 });

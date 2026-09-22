@@ -34,7 +34,7 @@ npm install
 | `CLIENT_SECRET` | OAuth2 Secret приложения — без него сайт не пустит в Discord |
 | `OWNER_ID` | Discord ID владельца. Если пусто, бот берёт владельца приложения |
 | `PORT` | HTTP для сайта и health-check, по умолчанию `3000` |
-| `PUBLIC_URL` | публичный адрес панели без слэша, например `https://bot.example.com` |
+| `PUBLIC_URL` | можно не ставить на Render — берётся сам. Иначе публичный адрес панели без слэша |
 | `PREFIX` | префикс текстовых команд, по умолчанию `!` |
 | `DATABASE_PATH` | файл экономики. По умолчанию `data/economy.sqlite`. На хостинге поставь путь на диск, который не стирается при деплое |
 | `SERVERS_FILE` | путь к JSON с приветствиями (стартовые значения, дальше всё с сайта) |
@@ -54,11 +54,13 @@ npm start
 
 Как у Juniper: логин через Discord, список своих серверов, форма префикса и welcome/leave.
 
-1. В Discord Developer Portal → OAuth2 → Redirects добавь `{PUBLIC_URL}/oauth/callback`
-2. Пропиши `CLIENT_ID`, `CLIENT_SECRET` и `PUBLIC_URL` в `.env`
-3. Открой сайт, нажми «Войти через Discord»
-4. Видны только серверы, где ты владелец, админ или с правом Manage Server
-5. Если бота ещё нет — кнопка инвайта, потом настройки
+Ссылка на панель — не из Discord. Это адрес сайта бота, вида `https://имя.onrender.com` (не `dashboard.render.com`).
+
+На Render сверху на странице сервиса кликабельный `….onrender.com`. Бот подхватывает его сам: в логах `Сайт: https://….onrender.com`, в `/help` тоже.
+
+В Discord → OAuth2 → Redirects вставь этот адрес + `/oauth/callback`, например `https://имя.onrender.com/oauth/callback`. В env нужен ещё `CLIENT_SECRET`.
+
+Видеть и менять настройки можно только на серверах, где ты админ / владелец / Manage Server. Если бота ещё нет — кнопка инвайта.
 
 Настройки пишутся в SQLite и сразу действуют: префикс-команды, канал и тексты входа/выхода. `{user}` — упоминание.
 

@@ -1,4 +1,5 @@
 const http = require("http");
+const { PUBLIC_URL } = require("./Config");
 const { handleRequest } = require("./Web/app");
 const { client, startBot } = require("./index.js");
 
@@ -13,7 +14,7 @@ http.createServer((req, res) => {
         res.end("Internal error");
     });
 }).listen(port, () => {
-    console.log(`Сайт: http://localhost:${port}`);
+    console.log(`Сайт: ${PUBLIC_URL || `http://localhost:${port}`}`);
 });
 
 startBot().catch(error => {
