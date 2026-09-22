@@ -28,7 +28,11 @@ function parseForm(body) {
     const params = new URLSearchParams(body);
     const data = {};
     for (const [key, value] of params.entries()) {
-        data[key] = value;
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+            data[key] = [].concat(data[key], value);
+        } else {
+            data[key] = value;
+        }
     }
     return data;
 }

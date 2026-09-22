@@ -48,7 +48,7 @@ module.exports = {
             : "Только слэш-команды.";
 
         if (PUBLIC_URL) {
-            description += `\nСайт: ${PUBLIC_URL}/servers/${interaction.guild.id}`;
+            description += `\nСайт: ${PUBLIC_URL}/servers/${interaction.guild.id}/general`;
         }
 
         return reply(interaction, { description });

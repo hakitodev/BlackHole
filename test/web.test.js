@@ -151,26 +151,45 @@ test("GET /servers показывает серверы, где есть прав
     assert.doesNotMatch(res.body, /Чужой/);
 });
 
-test("GET /servers/:id форма настроек и экранирование имени", async () => {
+test("GET /servers/:id редиректит в general", async () => {
     const res = mockRes();
     await handleRequest(mockReq({
         url: `/servers/${GUILD_ID}`,
         headers: { cookie: sessionCookie() }
     }), res, fakeClient());
+    assert.equal(res.statusCode, 302);
+    assert.equal(res.headers.Location, `/servers/${GUILD_ID}/general`);
+});
+
+test("GET /servers/:id/general форма и экранирование имени", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: `/servers/${GUILD_ID}/general`,
+        headers: { cookie: sessionCookie() }
+    }), res, fakeClient());
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /Сервер &lt;script&gt;/);
     assert.doesNotMatch(res.body, /<script>/);
+    assert.match(res.body, /name="prefixText"/);
+    assert.match(res.body, /Автороль/);
+    assert.match(res.body, /Автомод/);
+});
+
+test("GET /servers/:id/welcome каналы без войса", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        url: `/servers/${GUILD_ID}/welcome`,
+        headers: { cookie: sessionCookie() }
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 200);
     assert.match(res.body, /#general/);
     assert.doesNotMatch(res.body, /#voice/);
-    assert.match(res.body, /name="prefixText"/);
     assert.match(res.body, /name="welcomeMessage"/);
 });
 
-test("POST /servers/:id сохраняет настройки", async () => {
+test("POST /servers/:id/welcome сохраняет настройки", async () => {
     const res = mockRes();
     const body = new URLSearchParams({
-        prefix: "1",
-        prefixText: "?",
         welcomeOn: "1",
         welcomeChannel: "111222333444555666",
         welcomeMessage: "Привет, {user}",
@@ -179,7 +198,7 @@ test("POST /servers/:id сохраняет настройки", async () => {
 
     await handleRequest(mockReq({
         method: "POST",
-        url: `/servers/${GUILD_ID}`,
+        url: `/servers/${GUILD_ID}/welcome`,
         headers: {
             cookie: sessionCookie(),
             "content-type": "application/x-www-form-urlencoded"
@@ -188,14 +207,51 @@ test("POST /servers/:id сохраняет настройки", async () => {
     }), res, fakeClient());
 
     assert.equal(res.statusCode, 302);
-    assert.equal(res.headers.Location, `/servers/${GUILD_ID}?saved=1`);
+    assert.equal(res.headers.Location, `/servers/${GUILD_ID}/welcome?saved=1`);
 
     const settings = await economy.getGuildSettings(GUILD_ID);
-    assert.equal(settings.prefixText, "?");
     assert.equal(settings.welcomeOn, true);
     assert.equal(settings.welcomeChannel, "111222333444555666");
     assert.equal(settings.welcomeMessage, "Привет, {user}");
     assert.equal(settings.leaveMessage, "Пока");
+});
+
+test("POST /servers/:id/general не затирает welcome", async () => {
+    await economy.saveGuildSettings(GUILD_ID, {
+        welcomeOn: true,
+        welcomeMessage: "не трогай"
+    });
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/general`,
+        headers: {
+            cookie: sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "prefix=1&prefixText=%3F"
+    }), res, fakeClient());
+
+    const settings = await economy.getGuildSettings(GUILD_ID);
+    assert.equal(settings.prefixText, "?");
+    assert.equal(settings.welcomeMessage, "не трогай");
+});
+
+test("POST /servers/:id/commands добавляет кастом-команду", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/commands`,
+        headers: {
+            cookie: sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "op=add&name=hi&response=Привет%2C+%7Buser%7D"
+    }), res, fakeClient());
+
+    assert.equal(res.statusCode, 302);
+    const custom = await economy.getCustomCommand(GUILD_ID, "hi");
+    assert.equal(custom.response, "Привет, {user}");
 });
 
 test("GET /servers/:id без прав — 403", async () => {

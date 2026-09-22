@@ -27,7 +27,7 @@ module.exports = {
             },
             {
                 name: "Сервер",
-                value: "`/ping` `/avatar` `/user` `/server` `/help` `/settings`"
+                value: "`/ping` `/avatar` `/user` `/server` `/help` `/settings` `/rank`"
             },
             {
                 name: "Развлечения",
@@ -52,6 +52,11 @@ module.exports = {
                 value: PUBLIC_URL
             });
         }
+
+        fields.push({
+            name: "Панель",
+            value: "Приветствия, автороль, логи, уровни, автомод и свои команды"
+        });
 
         return reply(interaction, {
             color: COLOR.blurple,

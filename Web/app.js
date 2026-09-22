@@ -13,11 +13,14 @@ const {
     parseCookies
 } = require("./session");
 const { authorizeUrl, exchangeCode, discordGet, inviteUrl } = require("./oauth");
-const { homePage, serversPage, settingsPage, errorPage } = require("./html");
+const { homePage, serversPage, settingsPage, errorPage, MODULES } = require("./html");
+const { asList } = require("../Utils/ids");
+const { DANGEROUS_PERMISSIONS } = require("../Utils/roles");
 
 const STYLE = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
 const oauthStates = new Map();
 const STATE_TTL = 10 * 60 * 1000;
+const MODULE_IDS = new Set(MODULES.map(item => item.id));
 
 function send(res, status, body, headers = {}) {
     res.writeHead(status, {
@@ -77,6 +80,73 @@ function withBotFlag(client, guilds) {
         ...guild,
         bot: present.has(guild.id)
     }));
+}
+
+function checked(form, key) {
+    const value = form[key];
+    if (Array.isArray(value)) {
+        return value.includes("1");
+    }
+    return value === "1";
+}
+
+function assignableRoles(guild) {
+    const me = guild.members?.me;
+    return [...(guild.roles?.cache?.values() ?? [])]
+        .filter(role => {
+            if (!role || role.id === guild.id || role.managed) {
+                return false;
+            }
+            if (DANGEROUS_PERMISSIONS.some(permission => role.permissions?.has?.(permission))) {
+                return false;
+            }
+            if (me?.roles?.highest && me.roles.highest.comparePositionTo(role) <= 0) {
+                return false;
+            }
+            return true;
+        })
+        .sort((a, b) => (b.rawPosition ?? 0) - (a.rawPosition ?? 0))
+        .slice(0, 40)
+        .map(role => ({ id: role.id, name: role.name }));
+}
+
+function patchFromForm(module, form) {
+    if (module === "welcome") {
+        return {
+            welcomeOn: checked(form, "welcomeOn"),
+            welcomeChannel: form.welcomeChannel,
+            welcomeMessage: form.welcomeMessage,
+            leaveMessage: form.leaveMessage
+        };
+    }
+    if (module === "autorole") {
+        return { autoroles: asList(form.autorole) };
+    }
+    if (module === "logs") {
+        return {
+            logChannel: form.logChannel,
+            logJoins: checked(form, "logJoins"),
+            logMessages: checked(form, "logMessages"),
+            logMod: checked(form, "logMod")
+        };
+    }
+    if (module === "levels") {
+        return {
+            levelsOn: checked(form, "levelsOn"),
+            levelsChannel: form.levelsChannel,
+            levelsMessage: form.levelsMessage
+        };
+    }
+    if (module === "automod") {
+        return {
+            automodInvites: checked(form, "automodInvites"),
+            automodWords: form.automodWords
+        };
+    }
+    return {
+        prefix: checked(form, "prefix"),
+        prefixText: form.prefixText
+    };
 }
 
 function textChannels(guild) {
@@ -166,7 +236,7 @@ async function handleRequest(req, res, client) {
         return;
     }
 
-    const serverMatch = url.pathname.match(/^\/servers\/(\d{17,20})$/);
+    const serverMatch = url.pathname.match(/^\/servers\/(\d{17,20})(?:\/([a-z]+))?$/);
     if (serverMatch) {
         if (!user) {
             redirect(res, "/login");
@@ -174,6 +244,12 @@ async function handleRequest(req, res, client) {
         }
 
         const guildId = serverMatch[1];
+        const module = serverMatch[2] || "";
+        if (module && !MODULE_IDS.has(module)) {
+            send(res, 404, errorPage({ user, message: "Страница не найдена." }));
+            return;
+        }
+
         const listed = findManaged(session, guildId);
         if (!listed) {
             send(res, 403, errorPage({ user, message: "Нет прав на этот сервер." }));
@@ -190,19 +266,27 @@ async function handleRequest(req, res, client) {
             return;
         }
 
+        const current = module || "general";
+
+        if (!module && req.method === "GET") {
+            redirect(res, `/servers/${guildId}/general`);
+            return;
+        }
+
         if (req.method === "POST") {
             try {
                 const raw = await readBody(req);
                 const form = parseForm(raw);
-                await economy.saveGuildSettings(guildId, {
-                    prefix: form.prefix === "1",
-                    prefixText: form.prefixText,
-                    welcomeOn: form.welcomeOn === "1",
-                    welcomeChannel: form.welcomeChannel,
-                    welcomeMessage: form.welcomeMessage,
-                    leaveMessage: form.leaveMessage
-                });
-                redirect(res, `/servers/${guildId}?saved=1`);
+                if (current === "commands") {
+                    if (form.op === "delete") {
+                        await economy.deleteCustomCommand(guildId, form.name);
+                    } else {
+                        await economy.saveCustomCommand(guildId, form.name, form.response);
+                    }
+                } else {
+                    await economy.saveGuildSettings(guildId, patchFromForm(current, form));
+                }
+                redirect(res, `/servers/${guildId}/${current}?saved=1`);
             } catch (error) {
                 console.error(error);
                 send(res, 500, errorPage({ user, message: "Не удалось сохранить." }));
@@ -216,6 +300,9 @@ async function handleRequest(req, res, client) {
             guild: { id: guild.id, name: guild.name },
             settings,
             channels: textChannels(guild),
+            roles: assignableRoles(guild),
+            commands: current === "commands" ? await economy.listCustomCommands(guildId) : [],
+            module: current,
             saved: url.searchParams.get("saved") === "1"
         }));
         return;

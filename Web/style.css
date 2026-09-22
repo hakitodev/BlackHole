@@ -184,8 +184,36 @@ h2 { margin: 0 0 8px; }
 .section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .muted { color: var(--muted); font-size: 13px; }
 
+.dash {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 24px;
+    align-items: start;
+    margin-top: 16px;
+}
+.side {
+    display: grid;
+    gap: 4px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 8px;
+}
+.side a {
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px;
+}
+.side a:hover { text-decoration: none; background: var(--bg-2); }
+.side a.active { background: var(--accent); color: white; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.table td form { margin: 0; }
+
 @media (max-width: 640px) {
     .hero h1 { font-size: 32px; }
     .top { padding: 12px 16px; }
     .wrap { width: min(1080px, calc(100% - 24px)); padding-top: 20px; }
+    .dash { grid-template-columns: 1fr; }
 }

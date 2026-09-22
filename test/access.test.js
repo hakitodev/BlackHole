@@ -26,3 +26,8 @@ test("parseForm читает поля и чекбоксы", () => {
     assert.equal(data.welcomeOn, "1");
     assert.equal(data.welcomeMessage, "hi {user}");
 });
+
+test("parseForm: несколько одинаковых ключей", () => {
+    const data = parseForm("autorole=1&autorole=2");
+    assert.deepEqual(data.autorole, ["1", "2"]);
+});

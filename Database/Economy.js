@@ -3,6 +3,8 @@ const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
 const path = require("path");
 const { PREFIX, SERVERS } = require("../Config");
+const { parseIdList, snowflake } = require("../Utils/ids");
+const { parseWords } = require("../Utils/automod");
 
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
 const ROOT = path.join(__dirname, "..");
@@ -151,6 +153,15 @@ async function initDatabase(filename) {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS custom_commands (
+            guild_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            response TEXT NOT NULL,
+            PRIMARY KEY (guild_id, name)
+        );
+    `);
+
     await ensureColumns();
     await ensureGuildColumns();
     await checkpoint();
@@ -190,7 +201,17 @@ async function ensureGuildColumns() {
         welcome_on: "INTEGER NOT NULL DEFAULT 0",
         welcome_channel: "TEXT",
         welcome_message: "TEXT",
-        leave_message: "TEXT"
+        leave_message: "TEXT",
+        autorole_ids: "TEXT",
+        log_channel: "TEXT",
+        log_joins: "INTEGER NOT NULL DEFAULT 0",
+        log_messages: "INTEGER NOT NULL DEFAULT 0",
+        log_mod: "INTEGER NOT NULL DEFAULT 0",
+        levels_on: "INTEGER NOT NULL DEFAULT 0",
+        levels_channel: "TEXT",
+        levels_message: "TEXT",
+        automod_invites: "INTEGER NOT NULL DEFAULT 0",
+        automod_words: "TEXT"
     };
 
     for (const [name, definition] of Object.entries(required)) {
@@ -266,6 +287,12 @@ async function applyLevelUps(id) {
     }
 
     return { xp, level, leveled };
+}
+
+async function addXp(id, amount) {
+    await getUser(id);
+    await db.run("UPDATE users SET xp = xp + ? WHERE id = ?", amount, id);
+    return applyLevelUps(id);
 }
 
 async function addBalance(id, amount) {
@@ -680,7 +707,17 @@ function asGuildSettings(row, id) {
         welcomeOn: Number(row?.welcome_on) !== 0,
         welcomeChannel: row?.welcome_channel || "",
         welcomeMessage: row?.welcome_message || "",
-        leaveMessage: row?.leave_message || ""
+        leaveMessage: row?.leave_message || "",
+        autoroles: parseIdList(row?.autorole_ids),
+        logChannel: row?.log_channel || "",
+        logJoins: Number(row?.log_joins) !== 0,
+        logMessages: Number(row?.log_messages) !== 0,
+        logMod: Number(row?.log_mod) !== 0,
+        levelsOn: Number(row?.levels_on) !== 0,
+        levelsChannel: row?.levels_channel || "",
+        levelsMessage: row?.levels_message || "",
+        automodInvites: Number(row?.automod_invites) !== 0,
+        automodWords: row?.automod_words || ""
     };
 }
 
@@ -714,35 +751,135 @@ async function getGuildSettings(guildId) {
     return asGuildSettings(row, id);
 }
 
-async function saveGuildSettings(guildId, settings) {
+function pick(patch, current, key) {
+    return patch[key] === undefined ? current[key] : patch[key];
+}
+
+async function saveGuildSettings(guildId, patch) {
     const id = String(guildId);
-    const prefixText = String(settings.prefixText ?? PREFIX).trim().slice(0, 8) || PREFIX;
-    const welcomeChannel = String(settings.welcomeChannel ?? "").replace(/\D/g, "").slice(0, 20);
-    const welcomeMessage = String(settings.welcomeMessage ?? "").slice(0, 1000);
-    const leaveMessage = String(settings.leaveMessage ?? "").slice(0, 1000);
-    const prefix = settings.prefix ? 1 : 0;
-    const welcomeOn = settings.welcomeOn ? 1 : 0;
+    const current = await getGuildSettings(id);
+    const next = {
+        prefix: pick(patch, current, "prefix") ? 1 : 0,
+        prefixText: String(pick(patch, current, "prefixText") ?? PREFIX).trim().slice(0, 8) || PREFIX,
+        welcomeOn: pick(patch, current, "welcomeOn") ? 1 : 0,
+        welcomeChannel: snowflake(pick(patch, current, "welcomeChannel")),
+        welcomeMessage: String(pick(patch, current, "welcomeMessage") ?? "").slice(0, 1000),
+        leaveMessage: String(pick(patch, current, "leaveMessage") ?? "").slice(0, 1000),
+        autoroles: parseIdList(pick(patch, current, "autoroles")),
+        logChannel: snowflake(pick(patch, current, "logChannel")),
+        logJoins: pick(patch, current, "logJoins") ? 1 : 0,
+        logMessages: pick(patch, current, "logMessages") ? 1 : 0,
+        logMod: pick(patch, current, "logMod") ? 1 : 0,
+        levelsOn: pick(patch, current, "levelsOn") ? 1 : 0,
+        levelsChannel: snowflake(pick(patch, current, "levelsChannel")),
+        levelsMessage: String(pick(patch, current, "levelsMessage") ?? "").slice(0, 1000),
+        automodInvites: pick(patch, current, "automodInvites") ? 1 : 0,
+        automodWords: parseWords(pick(patch, current, "automodWords")).join("\n")
+    };
 
     await db.run(
-        `INSERT INTO guilds(id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message)
-         VALUES(?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guilds(
+            id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message,
+            autorole_ids, log_channel, log_joins, log_messages, log_mod,
+            levels_on, levels_channel, levels_message, automod_invites, automod_words
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
             welcome_on = excluded.welcome_on,
             welcome_channel = excluded.welcome_channel,
             welcome_message = excluded.welcome_message,
-            leave_message = excluded.leave_message`,
+            leave_message = excluded.leave_message,
+            autorole_ids = excluded.autorole_ids,
+            log_channel = excluded.log_channel,
+            log_joins = excluded.log_joins,
+            log_messages = excluded.log_messages,
+            log_mod = excluded.log_mod,
+            levels_on = excluded.levels_on,
+            levels_channel = excluded.levels_channel,
+            levels_message = excluded.levels_message,
+            automod_invites = excluded.automod_invites,
+            automod_words = excluded.automod_words`,
         id,
-        prefix,
-        prefixText,
-        welcomeOn,
-        welcomeChannel,
-        welcomeMessage,
-        leaveMessage
+        next.prefix,
+        next.prefixText,
+        next.welcomeOn,
+        next.welcomeChannel,
+        next.welcomeMessage,
+        next.leaveMessage,
+        next.autoroles.join(","),
+        next.logChannel,
+        next.logJoins,
+        next.logMessages,
+        next.logMod,
+        next.levelsOn,
+        next.levelsChannel,
+        next.levelsMessage,
+        next.automodInvites,
+        next.automodWords
     );
 
     return getGuildSettings(id);
+}
+
+function cleanCommandName(name) {
+    return String(name ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+}
+
+async function listCustomCommands(guildId) {
+    return db.all(
+        "SELECT name, response FROM custom_commands WHERE guild_id = ? ORDER BY name",
+        String(guildId)
+    );
+}
+
+async function getCustomCommand(guildId, name) {
+    const key = cleanCommandName(name);
+    if (!key) {
+        return null;
+    }
+    const row = await db.get(
+        "SELECT name, response FROM custom_commands WHERE guild_id = ? AND name = ?",
+        String(guildId),
+        key
+    );
+    return row ?? null;
+}
+
+async function saveCustomCommand(guildId, name, response) {
+    const key = cleanCommandName(name);
+    const text = String(response ?? "").trim().slice(0, 1000);
+    if (!key || !text) {
+        return { ok: false, reason: "invalid" };
+    }
+
+    const count = await db.get(
+        "SELECT COUNT(*) AS n FROM custom_commands WHERE guild_id = ?",
+        String(guildId)
+    );
+    const existing = await getCustomCommand(guildId, key);
+    if (!existing && (Number(count?.n) || 0) >= 25) {
+        return { ok: false, reason: "limit" };
+    }
+
+    await db.run(
+        `INSERT INTO custom_commands(guild_id, name, response) VALUES(?, ?, ?)
+         ON CONFLICT(guild_id, name) DO UPDATE SET response = excluded.response`,
+        String(guildId),
+        key,
+        text
+    );
+    return { ok: true, name: key };
+}
+
+async function deleteCustomCommand(guildId, name) {
+    const key = cleanCommandName(name);
+    const result = await db.run(
+        "DELETE FROM custom_commands WHERE guild_id = ? AND name = ?",
+        String(guildId),
+        key
+    );
+    return result.changes > 0;
 }
 
 async function isPrefixEnabled(guildId) {
@@ -764,6 +901,7 @@ module.exports = {
     closeDatabase,
     resolveDatabasePath,
     getUser,
+    addXp,
     addBalance,
     removeBalance,
     setBalance,
@@ -789,5 +927,9 @@ module.exports = {
     setPrefixEnabled,
     getGuildSettings,
     saveGuildSettings,
+    listCustomCommands,
+    getCustomCommand,
+    saveCustomCommand,
+    deleteCustomCommand,
     neededXp
 };

@@ -79,3 +79,25 @@ test("servers.json сидирует только при первом созда�
     assert.equal(second.welcomeChannel, "");
     assert.equal(second.welcomeMessage, "");
 });
+
+test("saveGuildSettings: частичный апдейт не трёт welcome", async () => {
+    const id = "777888999000111222";
+    await economy.saveGuildSettings(id, {
+        welcomeOn: true,
+        welcomeMessage: "жив"
+    });
+    await economy.saveGuildSettings(id, { prefixText: "bh!" });
+    const settings = await economy.getGuildSettings(id);
+    assert.equal(settings.prefixText, "bh!");
+    assert.equal(settings.welcomeMessage, "жив");
+});
+
+test("custom commands: add get delete", async () => {
+    const id = "111000222333444555";
+    const saved = await economy.saveCustomCommand(id, "Hi!", "Привет, {user}");
+    assert.equal(saved.ok, true);
+    assert.equal(saved.name, "hi");
+    assert.equal((await economy.getCustomCommand(id, "hi")).response, "Привет, {user}");
+    assert.equal(await economy.deleteCustomCommand(id, "hi"), true);
+    assert.equal(await economy.getCustomCommand(id, "hi"), null);
+});

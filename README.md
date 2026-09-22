@@ -9,7 +9,7 @@ Discord-бот на Node.js: экономика, магазин, модерац�
 - Развлечения: `/8ball` `/roll` `/pick`
 - Сервер: `/ping` `/avatar` `/user` `/server` `/help` `/settings`
 - Мод: `/mod` `/give` `/take` `/authpanel` `/clear` `/slowmode`
-- Сайт: префикс и приветствия без возни в чате
+- Сайт: приветствия, автороль, логи, уровни, автомод, свои команды
 
 `/pay`, `/dep`, `/with`, `/flip`, `/take` принимают `all`.
 
@@ -52,7 +52,24 @@ npm start
 
 ## Сайт с настройками
 
-Как у Juniper: логин через Discord, список своих серверов, форма префикса и welcome/leave.
+Логин через Discord, список серверов, слева модули как у Juniper: общие, приветствия, автороль, логи, уровни, автомод, свои команды.
+
+`{user}` `{server}` `{count}` `{level}` подставляются в текстах.
+
+### Красивая ссылка
+
+`blackhole-d7h5.onrender.com` даёт сам Render, из кода его не сократить.
+
+- Свой домен: Render → сервис → Settings → Custom Domains, например `bot.твойдомен.ru`. Потом `PUBLIC_URL=https://bot.твойдомен.ru` и в Discord Redirects `https://bot.твойдомен.ru/oauth/callback`.
+- Или переименуй Web Service в Render в `blackhole` — если имя свободно, будет `https://blackhole.onrender.com`.
+
+### Нагрузка
+
+Один процесс + SQLite нормально тянет обычный сервер и панель. Не крути несколько инстансов Render на одной базе.
+
+Бесплатный Render засыпает без запросов ~15 минут, первый заход после сна тупит. Чтобы сайт не спал — план Starter. Health-check `/health` уже есть.
+
+Экономика и XP общие на все гильдии. Автомод и кастом-команды — на каждый сервер свои.
 
 Ссылка на панель — не из Discord. Это адрес сайта бота, вида `https://имя.onrender.com` (не `dashboard.render.com`).
 
@@ -61,10 +78,6 @@ npm start
 В Discord → OAuth2 → Redirects вставь этот адрес + `/oauth/callback`, например `https://имя.onrender.com/oauth/callback`. В env нужен ещё `CLIENT_SECRET`.
 
 Видеть и менять настройки можно только на серверах, где ты админ / владелец / Manage Server. Если бота ещё нет — кнопка инвайта.
-
-Настройки пишутся в SQLite и сразу действуют: префикс-команды, канал и тексты входа/выхода. `{user}` — упоминание.
-
-`/settings prefix` по-прежнему переключает префикс из Discord. Остальное удобнее с сайта. `/help` показывает ссылку, если задан `PUBLIC_URL`.
 
 ## Конфиг серверов
 
@@ -111,20 +124,20 @@ npm start
 npm test
 ```
 
-Проверяются `transfer`, `rob`, `flip`, пагинация топа, `collect`, разбор префикс-команд с ответом на сообщение, настройки гильдии и страницы сайта.
+Проверяются `transfer`, `rob`, `flip`, пагинация топа, `collect`, префикс, настройки гильдии, кастом-команды и страницы панели.
 
 ## Структура
 
 ```
 Commands/   слэш-команды
 Buttons/    кнопки (авторизация и топ)
-Events/     ready, join, leave, prefix-команды
-Database/   SQLite, экономика и настройки серверов
-Web/        OAuth, список серверов, форма настроек
-Utils/      staff, магазин, collect, префикс
+Events/     ready, join, leave, логи, prefix
+Database/   SQLite: экономика, гильдии, кастом-команды
+Web/        OAuth и панель модулей
+Utils/      staff, магазин, collect, префикс, автомод
 servers.json
 ```
 
 ## Права бота
 
-Минимум: отправка сообщений, эмбеды, Manage Roles (для `/authpanel`), Manage Messages и Manage Channels (для `/clear` и `/slowmode`).
+Минимум: отправка сообщений, эмбеды, Manage Roles (автороль и `/authpanel`), Manage Messages и Manage Channels (`/clear`, `/slowmode`).

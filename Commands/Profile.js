@@ -18,6 +18,7 @@ module.exports = {
                 .setName("user")
                 .setDescription("Пользователь или ответ на сообщение")
         ),
+    aliases: ["rank", "level"],
 
     async execute(interaction) {
         const member = interaction.options.getUser("user") ?? interaction.user;
