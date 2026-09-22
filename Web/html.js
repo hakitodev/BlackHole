@@ -9,8 +9,8 @@ const { DROP_KINDS } = require("../Utils/boxes");
 const GUILD_TABS = [
     { id: "general", title: "Общие" },
     { id: "autorole", title: "Автороль" },
-    { id: "automod", title: "Автомод" },
-    { id: "shop", title: "Магаз сервера" },
+    // { id: "automod", title: "Автомод" },
+    { id: "shop", title: "Магазин" },
     { id: "jobs", title: "Работы" },
     { id: "biz", title: "Бизнесы" },
     { id: "boxes", title: "Боксы" }
@@ -69,7 +69,7 @@ function sideNav({
     if (guild) {
         bits.push(accordion("Сервер", GUILD_TABS.map(item =>
             navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
-        ).join(""), ["general", "autorole", "automod", "shop", "jobs", "biz", "boxes"].includes(module)));
+        ).join(""), ["general", "autorole", "shop", "jobs", "biz", "boxes"].includes(module))); // "automod", 
 
         bits.push(accordion("Команды", COMMANDS.map(item =>
             navLink(
@@ -621,21 +621,21 @@ function moduleForm(module, guild, settings, extras) {
           </form>`;
     }
 
-    if (module === "automod") {
-        return `
-          <form class="stack card" method="post" action="${action}">
-            <h2>Автомод</h2>
-            <input type="hidden" name="automodInvites" value="0">
-            <label class="switch">
-              <input type="checkbox" name="automodInvites" value="1" ${settings.automodInvites ? "checked" : ""}>
-              Удалять инвайты Discord
-            </label>
-            <label><span>Запрещённые слова</span>
-              <textarea name="automodWords">${escapeHtml(settings.automodWords)}</textarea>
-            </label>
-            <button class="btn" type="submit">Сохранить</button>
-          </form>`;
-    }
+    // if (module === "automod") {
+    //     return `
+    //       <form class="stack card" method="post" action="${action}">
+    //         <h2>Автомод</h2>
+    //         <input type="hidden" name="automodInvites" value="0">
+    //         <label class="switch">
+    //           <input type="checkbox" name="automodInvites" value="1" ${settings.automodInvites ? "checked" : ""}>
+    //           Удалять инвайты Discord
+    //         </label>
+    //         <label><span>Запрещённые слова</span>
+    //           <textarea name="automodWords">${escapeHtml(settings.automodWords)}</textarea>
+    //         </label>
+    //         <button class="btn" type="submit">Сохранить</button>
+    //       </form>`;
+    // }
 
     if (module === "shop") {
         return `
