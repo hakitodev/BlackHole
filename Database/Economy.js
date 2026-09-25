@@ -9,6 +9,7 @@ const { GLOBAL_SCOPE, normScope, isGuildScope } = require("../Utils/scope");
 const { asDrop, dropExtra, roll, getBox } = require("../Utils/boxes");
 const { isHexColor } = require("../Utils/color");
 const { JOBS } = require("../Utils/jobs");
+const settingsCache = require("../Utils/settingsCache");
 
 const COOLDOWN_COLUMNS = new Set(["daily", "work", "crime", "rob"]);
 const ROOT = path.join(__dirname, "..");
@@ -76,6 +77,7 @@ function checkpoint() {
 }
 
 async function initDatabase(filename) {
+    settingsCache.clear();
     if (db) {
         checkpoint();
         db.close();
@@ -291,6 +293,7 @@ async function initDatabase(filename) {
     await migrateIndexes();
     await seedGlobalShop();
     await seedDefaultBoxes();
+    warmGuildCache();
     checkpoint();
 
     if (!filename) {
@@ -345,6 +348,14 @@ async function ensureGuildColumns() {
         levels_message: "TEXT",
         automod_invites: "INTEGER NOT NULL DEFAULT 0",
         automod_words: "TEXT",
+        automod_links: "INTEGER NOT NULL DEFAULT 0",
+        automod_spam: "INTEGER NOT NULL DEFAULT 0",
+        automod_swear: "INTEGER NOT NULL DEFAULT 0",
+        automod_caps: "INTEGER NOT NULL DEFAULT 0",
+        automod_fine_links: "INTEGER NOT NULL DEFAULT 0",
+        automod_fine_spam: "INTEGER NOT NULL DEFAULT 0",
+        automod_fine_swear: "INTEGER NOT NULL DEFAULT 0",
+        automod_fine_caps: "INTEGER NOT NULL DEFAULT 0",
         disabled_commands: "TEXT",
         xp_on: "INTEGER NOT NULL DEFAULT 1",
         level_money: "INTEGER NOT NULL DEFAULT 250",
@@ -371,10 +382,20 @@ async function ensureGuildColumns() {
         rob_max: "INTEGER NOT NULL DEFAULT 15000"
     };
 
+    const hadLinks = names.has("automod_links");
+    const hadSwear = names.has("automod_swear");
+
     for (const [name, definition] of Object.entries(required)) {
         if (!names.has(name)) {
             db.exec(`ALTER TABLE guilds ADD COLUMN ${name} ${definition}`);
         }
+    }
+
+    if (!hadLinks) {
+        db.exec("UPDATE guilds SET automod_links = automod_invites");
+    }
+    if (!hadSwear) {
+        db.exec("UPDATE guilds SET automod_swear = 1 WHERE TRIM(IFNULL(automod_words, '')) != ''");
     }
 }
 
@@ -625,6 +646,7 @@ function getUser(id, scope = GLOBAL_SCOPE) {
 }
 
 async function closeDatabase() {
+    settingsCache.clear();
     if (db) {
         checkpoint();
         db.close();
@@ -1745,6 +1767,18 @@ function asGuildSettings(row, id) {
         levelsMessage: row?.levels_message || "",
         automodInvites: Number(row?.automod_invites) !== 0,
         automodWords: row?.automod_words || "",
+        automodLinks: row?.automod_links == null
+            ? Number(row?.automod_invites) !== 0
+            : Number(row.automod_links) !== 0,
+        automodSpam: Number(row?.automod_spam) !== 0,
+        automodSwear: row?.automod_swear == null
+            ? Boolean(row?.automod_words)
+            : Number(row.automod_swear) !== 0,
+        automodCaps: Number(row?.automod_caps) !== 0,
+        automodFineLinks: Math.max(0, Number(row?.automod_fine_links) || 0),
+        automodFineSpam: Math.max(0, Number(row?.automod_fine_spam) || 0),
+        automodFineSwear: Math.max(0, Number(row?.automod_fine_swear) || 0),
+        automodFineCaps: Math.max(0, Number(row?.automod_fine_caps) || 0),
         disabledCommands: String(row?.disabled_commands || "")
             .split(",")
             .map(name => name.trim())
@@ -1784,7 +1818,19 @@ async function getGuildSettings(guildId) {
     );
 
     let row = db.get("SELECT * FROM guilds WHERE id = ?", id);
-    return asGuildSettings(row, id);
+    const settings = asGuildSettings(row, id);
+    settingsCache.put(settings);
+    return settings;
+}
+
+function listGuildSettings() {
+    const rows = db.all("SELECT * FROM guilds");
+    return rows.map(row => asGuildSettings(row, row.id));
+}
+
+function warmGuildCache() {
+    settingsCache.warm(listGuildSettings());
+    return settingsCache.size();
 }
 
 function pick(patch, current, key) {
@@ -1850,6 +1896,16 @@ async function saveGuildSettings(guildId, patch) {
         levelsMessage: String(pick(patch, current, "levelsMessage") ?? "").slice(0, 1000),
         automodInvites: pick(patch, current, "automodInvites") ? 1 : 0,
         automodWords: parseWords(pick(patch, current, "automodWords")).join("\n"),
+        automodLinks: pick(patch, current, "automodLinks") != null
+            ? (pick(patch, current, "automodLinks") ? 1 : 0)
+            : (pick(patch, current, "automodInvites") ? 1 : 0),
+        automodSpam: pick(patch, current, "automodSpam") ? 1 : 0,
+        automodSwear: pick(patch, current, "automodSwear") ? 1 : 0,
+        automodCaps: pick(patch, current, "automodCaps") ? 1 : 0,
+        automodFineLinks: moneyInt(pick(patch, current, "automodFineLinks")),
+        automodFineSpam: moneyInt(pick(patch, current, "automodFineSpam")),
+        automodFineSwear: moneyInt(pick(patch, current, "automodFineSwear")),
+        automodFineCaps: moneyInt(pick(patch, current, "automodFineCaps")),
         disabledCommands: Array.isArray(pick(patch, current, "disabledCommands"))
             ? pick(patch, current, "disabledCommands")
             : String(pick(patch, current, "disabledCommands") || "")
@@ -1880,17 +1936,20 @@ async function saveGuildSettings(guildId, patch) {
         flipMax: clampGuildCap(pick(patch, current, "flipMax"), FLIP_MAX_BET),
         robMax: clampGuildCap(pick(patch, current, "robMax"), ROB_MAX_STEAL)
     };
+    next.automodInvites = next.automodLinks;
 
     db.run(
         `INSERT INTO guilds(
             id, prefix, prefix_text, welcome_on, welcome_channel, welcome_message, leave_message,
             autorole_ids, log_channel, log_joins, log_messages, log_mod,
             levels_on, levels_channel, levels_message, automod_invites, automod_words,
+            automod_links, automod_spam, automod_swear, automod_caps,
+            automod_fine_links, automod_fine_spam, automod_fine_swear, automod_fine_caps,
             disabled_commands, xp_on, level_money,
             daily_min, daily_max, work_min, work_max, crime_min, crime_max, crime_fine_min, crime_fine_max,
             wallet_scope, jobs_global, jobs_guild, biz_global, biz_guild, shop_global, shop_guild,
             earn_on, economy_on, penalties_on, paused, flip_max, rob_max
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             prefix = excluded.prefix,
             prefix_text = excluded.prefix_text,
@@ -1908,6 +1967,14 @@ async function saveGuildSettings(guildId, patch) {
             levels_message = excluded.levels_message,
             automod_invites = excluded.automod_invites,
             automod_words = excluded.automod_words,
+            automod_links = excluded.automod_links,
+            automod_spam = excluded.automod_spam,
+            automod_swear = excluded.automod_swear,
+            automod_caps = excluded.automod_caps,
+            automod_fine_links = excluded.automod_fine_links,
+            automod_fine_spam = excluded.automod_fine_spam,
+            automod_fine_swear = excluded.automod_fine_swear,
+            automod_fine_caps = excluded.automod_fine_caps,
             disabled_commands = excluded.disabled_commands,
             xp_on = excluded.xp_on,
             level_money = excluded.level_money,
@@ -1949,6 +2016,14 @@ async function saveGuildSettings(guildId, patch) {
         next.levelsMessage,
         next.automodInvites,
         next.automodWords,
+        next.automodLinks,
+        next.automodSpam,
+        next.automodSwear,
+        next.automodCaps,
+        next.automodFineLinks,
+        next.automodFineSpam,
+        next.automodFineSwear,
+        next.automodFineCaps,
         next.disabledCommands.join(","),
         next.xpOn,
         next.levelMoney,
@@ -2836,6 +2911,33 @@ async function deleteDrop(scope, dropId) {
     return result.changes > 0;
 }
 
+function applyAutomodFine(id, amount, scope = GLOBAL_SCOPE) {
+    const fine = moneyInt(amount);
+    if (fine < 1) {
+        return { ok: false, taken: 0 };
+    }
+    getUser(id, scope);
+    const w = walletRef(scope, id);
+    return withTransaction(() => {
+        const row = db.get(
+            `SELECT balance FROM ${w.table} WHERE ${w.where}`,
+            ...w.keys
+        );
+        const cash = Math.max(0, Number(row?.balance) || 0);
+        const taken = Math.min(fine, cash);
+        if (taken < 1) {
+            return { ok: false, taken: 0 };
+        }
+        db.run(
+            `UPDATE ${w.table} SET balance = balance - ? WHERE ${w.where} AND balance >= ?`,
+            taken,
+            ...w.keys,
+            taken
+        );
+        return { ok: true, taken };
+    });
+}
+
 async function openBox(id, itemId, payout, scope = GLOBAL_SCOPE) {
     const userId = String(id);
     const item = cleanItemId(itemId);
@@ -2953,6 +3055,8 @@ module.exports = {
     setPrefixEnabled,
     getGuildSettings,
     saveGuildSettings,
+    warmGuildCache,
+    applyAutomodFine,
     listCustomCommands,
     getCustomCommand,
     saveCustomCommand,
