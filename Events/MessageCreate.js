@@ -7,7 +7,8 @@ const { canGainXp, xpGain } = require("../Utils/xp");
 const xpBuffer = require("../Utils/xpBuffer");
 const { walletScope, forGuild } = require("../Utils/scope");
 const { isOwner } = require("../Utils/staff");
-const { parseWords, hasInvite, findBannedWord, isPrivileged } = require("../Utils/automod");
+const { inspect } = require("../Utils/automod");
+const settingsCache = require("../Utils/settingsCache");
 const { fireEvent } = require("../Utils/events");
 const { customPayload } = require("../Utils/customEmbed");
 const { remember } = require("../Utils/profile");
@@ -26,19 +27,22 @@ async function repliedUser(message) {
 }
 
 async function handleAutomod(message, settings) {
-    if (!message.guild || isPrivileged(message.member)) {
-        return false;
-    }
-
-    const words = parseWords(settings.automodWords);
-    const inviteHit = settings.automodInvites && hasInvite(message.content);
-    const wordHit = findBannedWord(message.content, words);
-    if (!inviteHit && !wordHit) {
+    const hit = inspect(message, settings);
+    if (!hit) {
         return false;
     }
 
     await message.delete().catch(() => {});
-    const reason = inviteHit ? "инвайт" : `слово «${wordHit}»`;
+    let taken = 0;
+    if (hit.fine > 0) {
+        const fine = economy.applyAutomodFine(
+            message.author.id,
+            hit.fine,
+            walletScope(settings, message.guild.id)
+        );
+        taken = fine.taken || 0;
+    }
+    const reason = taken ? `${hit.reason}, −${taken}` : hit.reason;
     await fireEvent(message.guild, "automodLog", {
         user: message.author,
         channel: `${message.channel}`,
@@ -61,7 +65,15 @@ module.exports = {
         let settings = null;
 
         if (message.guild) {
-            settings = await economy.getGuildSettings(message.guild.id);
+            settings = settingsCache.get(message.guild.id) || {
+                id: message.guild.id,
+                prefix: true,
+                prefixText: PREFIX,
+                xpOn: true,
+                levelMoney: 250,
+                paused: false,
+                walletScope: "global"
+            };
             if (settings.paused && !isOwner({ client, user: message.author })) {
                 return;
             }

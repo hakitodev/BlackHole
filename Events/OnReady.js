@@ -1,4 +1,5 @@
 const { ActivityType } = require("discord.js");
+const economy = require("../Database/Economy");
 const { syncCommands } = require("../Utils/syncCommands");
 const { ownerIds } = require("../Utils/staff");
 
@@ -8,6 +9,11 @@ module.exports = {
     async execute(client) {
         console.log(`Бот запущен как ${client.user.tag} | серверов: ${client.guilds.cache.size}`);
         client.user.setActivity("/help", { type: ActivityType.Listening });
+        try {
+            economy.warmGuildCache();
+        } catch (error) {
+            console.error("Не удалось прогреть настройки серверов:", error);
+        }
 
         try {
             await client.application.fetch();

@@ -8,6 +8,7 @@ const { getBusiness } = require("../Utils/business");
 const { getBox, roll } = require("../Utils/boxes");
 const { isDisabled } = require("../Utils/commands");
 const { EVENT_TYPES } = require("../Utils/events");
+const settingsCache = require("../Utils/settingsCache");
 
 let dir;
 let n = 0;
@@ -209,6 +210,25 @@ test("daily/work/crime выключаются отдельно от collect", ()
     assert.equal(isDisabled(settings, "collect"), false);
     assert.equal(isDisabled(settings, "rob"), true);
     assert.equal(isDisabled(settings, "daily"), false);
+});
+
+test("штраф автомода списывает в транзакции и не уходит в минус", async () => {
+    const id = uid();
+    const guild = "555000111222333444";
+    await economy.addBalance(id, 30);
+    await economy.saveGuildSettings(guild, {
+        automodLinks: true,
+        automodFineLinks: 100
+    });
+    economy.warmGuildCache();
+    const cached = settingsCache.get(guild);
+    assert.equal(cached.automodLinks, true);
+    assert.equal(cached.automodFineLinks, 100);
+    const first = economy.applyAutomodFine(id, 100);
+    const second = economy.applyAutomodFine(id, 100);
+    assert.equal(first.taken, 30);
+    assert.equal(second.taken, 0);
+    assert.equal((await economy.getUser(id)).balance, 0);
 });
 
 test("ивенты покрывают войса и таймаут", () => {

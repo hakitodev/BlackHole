@@ -9,7 +9,7 @@ const { DROP_KINDS } = require("../Utils/boxes");
 const GUILD_TABS = [
     { id: "general", title: "Общие" },
     { id: "autorole", title: "Автороль" },
-    // { id: "automod", title: "Автомод" },
+    { id: "automod", title: "Автомод" },
     { id: "shop", title: "Магазин" },
     { id: "jobs", title: "Работы" },
     { id: "biz", title: "Бизнесы" },
@@ -69,7 +69,7 @@ function sideNav({
     if (guild) {
         bits.push(accordion("Сервер", GUILD_TABS.map(item =>
             navLink(`/servers/${guild.id}/${item.id}`, item.title, module === item.id)
-        ).join(""), ["general", "autorole", "shop", "jobs", "biz", "boxes"].includes(module))); // "automod", 
+        ).join(""), ["general", "autorole", "automod", "shop", "jobs", "biz", "boxes"].includes(module)));
 
         bits.push(accordion("Команды", COMMANDS.map(item =>
             navLink(
@@ -621,21 +621,28 @@ function moduleForm(module, guild, settings, extras) {
           </form>`;
     }
 
-    // if (module === "automod") {
-    //     return `
-    //       <form class="stack card" method="post" action="${action}">
-    //         <h2>Автомод</h2>
-    //         <input type="hidden" name="automodInvites" value="0">
-    //         <label class="switch">
-    //           <input type="checkbox" name="automodInvites" value="1" ${settings.automodInvites ? "checked" : ""}>
-    //           Удалять инвайты Discord
-    //         </label>
-    //         <label><span>Запрещённые слова</span>
-    //           <textarea name="automodWords">${escapeHtml(settings.automodWords)}</textarea>
-    //         </label>
-    //         <button class="btn" type="submit">Сохранить</button>
-    //       </form>`;
-    // }
+    if (module === "automod") {
+        const fine = (name, label, value) => `
+          <label><span>Штраф: ${escapeHtml(label)}</span>
+            <input type="number" name="${escapeHtml(name)}" min="0" value="${escapeHtml(String(value || 0))}">
+          </label>`;
+        return `
+          <form class="stack card" method="post" action="${action}">
+            <h2>Автомод</h2>
+            ${switchField("automodLinks", settings.automodLinks || settings.automodInvites, "Анти-ссылки")}
+            ${fine("automodFineLinks", "ссылки", settings.automodFineLinks)}
+            ${switchField("automodSpam", settings.automodSpam, "Анти-спам")}
+            ${fine("automodFineSpam", "спам", settings.automodFineSpam)}
+            ${switchField("automodSwear", settings.automodSwear, "Мат-фильтр")}
+            ${fine("automodFineSwear", "мат", settings.automodFineSwear)}
+            ${switchField("automodCaps", settings.automodCaps, "Анти-капс")}
+            ${fine("automodFineCaps", "капс", settings.automodFineCaps)}
+            <label><span>Свои слова, по строке</span>
+              <textarea name="automodWords">${escapeHtml(settings.automodWords || "")}</textarea>
+            </label>
+            <button class="btn" type="submit">Сохранить</button>
+          </form>`;
+    }
 
     if (module === "shop") {
         return `

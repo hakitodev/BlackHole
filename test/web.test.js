@@ -533,6 +533,27 @@ test("GET /servers/:id/boxes конструктор дропа", async () => {
     assert.match(res.body, /Новый бокс/);
 });
 
+test("POST автомода пишет тумблеры и штрафы", async () => {
+    const res = mockRes();
+    await handleRequest(mockReq({
+        method: "POST",
+        url: `/servers/${GUILD_ID}/automod`,
+        headers: {
+            cookie: await sessionCookie(),
+            "content-type": "application/x-www-form-urlencoded"
+        },
+        body: "automodLinks=0&automodLinks=1&automodSpam=0&automodSwear=0&automodSwear=1&automodCaps=0&automodFineLinks=40&automodFineSpam=0&automodFineSwear=12&automodFineCaps=0&automodWords=дурак"
+    }), res, fakeClient());
+    assert.equal(res.statusCode, 302);
+    const settings = await economy.getGuildSettings(GUILD_ID);
+    assert.equal(settings.automodLinks, true);
+    assert.equal(settings.automodSwear, true);
+    assert.equal(settings.automodSpam, false);
+    assert.equal(settings.automodFineLinks, 40);
+    assert.equal(settings.automodFineSwear, 12);
+    assert.match(settings.automodWords, /дурак/);
+});
+
 test("GET timeout ивент есть", async () => {
     const res = mockRes();
     await handleRequest(mockReq({

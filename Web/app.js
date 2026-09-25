@@ -230,8 +230,15 @@ function patchFromForm(module, form) {
     }
     if (module === "automod") {
         return {
-            automodInvites: checked(form, "automodInvites"),
-            automodWords: form.automodWords
+            automodLinks: checked(form, "automodLinks"),
+            automodSpam: checked(form, "automodSpam"),
+            automodSwear: checked(form, "automodSwear"),
+            automodCaps: checked(form, "automodCaps"),
+            automodWords: form.automodWords,
+            automodFineLinks: form.automodFineLinks,
+            automodFineSpam: form.automodFineSpam,
+            automodFineSwear: form.automodFineSwear,
+            automodFineCaps: form.automodFineCaps
         };
     }
     return {
